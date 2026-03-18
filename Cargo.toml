@@ -5,3 +5,5 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 
 [dependencies]
+tokio = { version = "=1.44.0", features = ["full"] }
+tower-lsp = "0.20.0"
