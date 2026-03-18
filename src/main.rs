@@ -38,7 +38,6 @@ async fn main() {
 }
 
 /// Debugging function for logging messages from the LSP to a file.
-/// The file is ignored in the .gitignore file.
 fn log(msg: &str) {
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
