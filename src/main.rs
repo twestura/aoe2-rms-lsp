@@ -1,8 +1,11 @@
 //! Aoe2 RMS Language Server
 
+mod rms;
+
 use std::collections::HashMap;
 
 use tokio::sync::RwLock;
+use tower_lsp::Client;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, Hover,
@@ -11,10 +14,11 @@ use tower_lsp::lsp_types::{
     Url,
 };
 use tower_lsp::{
-    Client, LanguageServer, LspService, Server,
+    LanguageServer, LspService, Server,
     lsp_types::{InitializeParams, InitializeResult, InitializedParams, MessageType},
 };
 
+/// The server's in-memory state.
 #[derive(Debug)]
 struct Backend {
     client: Client,
@@ -43,7 +47,7 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "server initialized!")
             .await;
-        log("server initialized!");
+        // _log("server initialized!");
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -76,6 +80,7 @@ impl LanguageServer for Backend {
         let documents = self.documents.read().await;
         let hover_result = documents
             .get(&uri)
+            .filter(|text| !rms::is_in_comment(text, position))
             .and_then(|text| extract_token(text, position))
             .and_then(lookup_hover)
             .map(str::to_string)
@@ -102,7 +107,7 @@ async fn main() {
 }
 
 /// Debugging function for logging messages from the LSP to a file.
-fn log(msg: &str) {
+fn _log(msg: &str) {
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .create(true)
@@ -140,13 +145,13 @@ fn extract_token(text: &str, position: Position) -> Option<&str> {
 /// not have hover data.
 fn lookup_hover(token: &str) -> Option<&'static str> {
     match token {
-        "<PLAYER_SETUP>" => Some("# Player Setup"),
-        "<LAND_GENERATION>" => Some("# Land Generation"),
-        "<ELEVATION_GENERATION>" => Some("# Elevation Generation"),
-        "<CLIFF_GENERATION>" => Some("# Cliff Generation"),
-        "<TERRAIN_GENERATION>" => Some("# Terrain Generation"),
-        "<CONNECTION_GENERATION>" => Some("# Connection Generation"),
-        "<OBJECTS_GENERATION>" => Some("# Objects Generation"),
+        "<PLAYER_SETUP>" => Some(include_str!("../hover_docs/player-setup.md")),
+        "<LAND_GENERATION>" => Some(include_str!("../hover_docs/land-generation.md")),
+        "<ELEVATION_GENERATION>" => Some(include_str!("../hover_docs/elevation-generation.md")),
+        "<CLIFF_GENERATION>" => Some(include_str!("../hover_docs/cliff-generation.md")),
+        "<TERRAIN_GENERATION>" => Some(include_str!("../hover_docs/terrain-generation.md")),
+        "<CONNECTION_GENERATION>" => Some(include_str!("../hover_docs/connection-generation.md")),
+        "<OBJECTS_GENERATION>" => Some(include_str!("../hover_docs/objects-generation.md")),
         _ => None,
     }
 }
