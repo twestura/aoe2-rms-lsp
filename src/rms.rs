@@ -2,48 +2,91 @@
 
 use tower_lsp::lsp_types::Position;
 
-/// Returns `true` if the given position falls within a block comment in `text`,
-/// `false` otherwise.
+/// The context of a position within an RMS document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DocumentContext {
+    /// Whether the position falls within a block comment.
+    pub in_comment: bool,
+    /// Whether the position falls within a `{ }` block.
+    /// `true` if the most recently seen whitespace-delimited brace before
+    /// this position was `{`, `false` if it was `}` or no brace has been seen.
+    pub in_block: bool,
+}
+
+/// Returns the `DocumentContext` at the given position in `text`.
 ///
-/// RMS block comments begin with `/*` and end with `*/`. Both delimiters must
-/// be preceded by whitespace or the start of the file, and followed by
-/// whitespace or the end of the file. Comments may be nested. An unterminated
-/// comment that reaches the end of the file is valid.
+/// Scans the document from the start to `position` in a single pass,
+/// tracking comment depth and the most recently seen whitespace-delimited
+/// brace.
 ///
-/// Returns `true` if the position is on a comment delimiter itself (`/*` or
-/// `*/`).
+/// - `in_comment` is `true` if the position falls within a block comment
+///   or on a comment delimiter.
+/// - `in_block` is `true` if the most recently seen whitespace-delimited
+///   brace before `position` was `{`, `false` if it was `}` or no brace
+///   has been seen.
+/// - Braces inside comments are ignored.
+/// - Returns a context with both fields `false` if `position` is out of
+///   bounds.
 ///
 /// See the
 /// [LSP specification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position)
 /// for position encoding details.
-pub fn is_in_comment(text: &str, position: Position) -> bool {
+pub fn document_context_at(text: &str, position: Position) -> DocumentContext {
+    // let Some(offset) = position_to_offset(text, position) else {
+    //     return false; // invalid position, not in a comment
+    // };
+    // let mut depth = 0;
+    // let mut cursor = RmsCursor::new(text);
+    // for _ in 0..offset {
+    //     if cursor.is_comment_open() {
+    //         depth += 1;
+    //     } else if cursor.is_comment_close() && depth > 0 {
+    //         depth -= 1;
+    //     }
+    //     cursor.next();
+    // }
+    // depth > 0 || cursor.is_comment_open() || cursor.is_comment_close()
     let Some(offset) = position_to_offset(text, position) else {
-        return false; // invalid position, not in a comment
+        return DocumentContext {
+            in_comment: false,
+            in_block: false,
+        };
     };
+    let mut cursor = RmsCursor::new(text);
     let mut depth = 0;
-    let mut cursor = CommentCursor::new(text);
+    let mut in_block = false;
     for _ in 0..offset {
         if cursor.is_comment_open() {
             depth += 1;
         } else if cursor.is_comment_close() && depth > 0 {
             depth -= 1;
+        } else if depth == 0 {
+            if cursor.is_open_brace() {
+                in_block = true;
+            } else if cursor.is_close_brace() {
+                in_block = false;
+            }
         }
         cursor.next();
     }
-    depth > 0 || cursor.is_comment_open() || cursor.is_comment_close()
+    let in_comment = depth > 0 || cursor.is_comment_open() || cursor.is_comment_close();
+    DocumentContext {
+        in_comment,
+        in_block,
+    }
 }
 
 /// A cursor for scanning RMS text that tracks whitespace context
 /// and can detect comment delimiters.
 ///
 /// Treats the start of the file as preceded by whitespace.
-struct CommentCursor<'a> {
+struct RmsCursor<'a> {
     text: &'a str,
     offset: usize,
     prev_ws: bool,
 }
 
-impl<'a> CommentCursor<'a> {
+impl<'a> RmsCursor<'a> {
     /// Creates a new cursor at the start of `text`.
     fn new(text: &'a str) -> Self {
         Self {
@@ -103,6 +146,32 @@ impl<'a> CommentCursor<'a> {
                 .map(|c| c.is_ascii_whitespace())
                 .unwrap_or(true)
     }
+
+    /// Returns `true` if the current position is a valid open brace `{`,
+    /// preceded by whitespace or start of file, and followed by whitespace
+    /// or EOF.
+    fn is_open_brace(&self) -> bool {
+        self.peek() == Some('{')
+            && self.prev_ws
+            && self.text[self.offset..]
+                .chars()
+                .nth(1)
+                .map(|c| c.is_ascii_whitespace())
+                .unwrap_or(true)
+    }
+
+    /// Returns `true` if the current position is a valid close brace `}`,
+    /// preceded by whitespace or start of file, and followed by whitespace
+    /// or EOF.
+    fn is_close_brace(&self) -> bool {
+        self.peek() == Some('}')
+            && self.prev_ws
+            && self.text[self.offset..]
+                .chars()
+                .nth(1)
+                .map(|c| c.is_ascii_whitespace())
+                .unwrap_or(true)
+    }
 }
 
 /// Given a UTF-8 encoded string `text` and a `Position` (line, character),
@@ -147,81 +216,119 @@ mod tests {
     use super::*;
     use tower_lsp::lsp_types::Position;
 
-    mod is_in_comment {
+    mod document_context_at {
         use super::*;
+
+        /// An out of bounds position returns a context with both fields false.
+        #[test]
+        fn test_out_of_bounds() {
+            let text = "hello";
+            assert_eq!(
+                document_context_at(text, Position::new(5, 0)),
+                DocumentContext {
+                    in_comment: false,
+                    in_block: false
+                }
+            );
+        }
+
+        /// A position inside a block returns the correct context.
+        #[test]
+        fn test_in_block() {
+            let text = "<LAND_GENERATION>\ncreate_land {\nterrain_type GRASS\n}";
+            assert_eq!(
+                document_context_at(text, Position::new(2, 0)),
+                DocumentContext {
+                    in_comment: false,
+                    in_block: true
+                }
+            );
+        }
 
         /// A position in plain text is not in a comment.
         #[test]
         fn test_not_in_comment() {
             let text = "create_land { }";
-            assert!(!is_in_comment(text, Position::new(0, 0)));
+            assert!(!document_context_at(text, Position::new(0, 0)).in_comment);
         }
 
         /// A position inside a block comment is in a comment.
         #[test]
         fn test_in_comment() {
             let text = "/* this is a comment */";
-            assert!(is_in_comment(text, Position::new(0, 5)));
+            assert!(document_context_at(text, Position::new(0, 5)).in_comment);
         }
 
         /// A position on the opening delimiter is in a comment.
         #[test]
         fn test_on_opening_delimiter() {
             let text = "/* comment */";
-            assert!(is_in_comment(text, Position::new(0, 0)));
+            assert!(document_context_at(text, Position::new(0, 0)).in_comment);
         }
 
         /// A position on the closing delimiter is in a comment.
         #[test]
         fn test_on_closing_delimiter() {
             let text = "/* comment */";
-            assert!(is_in_comment(text, Position::new(0, 11)));
+            assert!(document_context_at(text, Position::new(0, 11)).in_comment);
         }
 
         /// A position inside a nested comment is in a comment.
         #[test]
         fn test_nested_comment() {
             let text = "/* outer /* inner */ still outer */";
-            assert!(is_in_comment(text, Position::new(0, 25)));
+            assert!(document_context_at(text, Position::new(0, 25)).in_comment);
         }
 
         /// A position after a closed comment is not in a comment.
         #[test]
         fn test_after_comment() {
             let text = "/* comment */ <PLAYER_SETUP>";
-            assert!(!is_in_comment(text, Position::new(0, 14)));
+            assert!(!document_context_at(text, Position::new(0, 14)).in_comment);
         }
 
         /// An unterminated comment that reaches end of file is valid.
         #[test]
         fn test_unterminated_comment() {
             let text = "/* unterminated";
-            assert!(is_in_comment(text, Position::new(0, 5)));
+            assert!(document_context_at(text, Position::new(0, 5)).in_comment);
         }
 
         /// A position in a comment spanning multiple lines is in a comment.
         #[test]
         fn test_multiline_comment() {
             let text = "/* comment\nstill comment */";
-            assert!(is_in_comment(text, Position::new(1, 0)));
+            assert!(document_context_at(text, Position::new(1, 0)).in_comment);
         }
 
-        /// A position after a multi-byte Unicode character correctly detects
-        /// a comment.
+        /// A position after a multi-byte Unicode character correctly detects a comment.
         #[test]
         fn test_comment_unicode_preceding() {
             let text = "é /* comment */";
-            assert!(is_in_comment(text, Position::new(0, 4)));
+            assert!(document_context_at(text, Position::new(0, 4)).in_comment);
+        }
+
+        /// A brace inside a comment does not affect in_block.
+        #[test]
+        fn test_brace_inside_comment_ignored() {
+            let text = "/* { */ base_terrain";
+            assert_eq!(
+                document_context_at(text, Position::new(0, 8)),
+                DocumentContext {
+                    in_comment: false,
+                    in_block: false
+                }
+            );
         }
     }
 
-    mod comment_cursor {
+    mod rms_cursor {
         use super::*;
 
         /// A cursor over an empty string has offset 0 and all peeks return None.
         #[test]
         fn test_empty_string() {
-            let mut cursor = CommentCursor::new("");
+            let mut cursor = RmsCursor::new("");
             assert_eq!(cursor.peek(), None);
             assert_eq!(cursor.peek2(), None);
             assert_eq!(cursor.next(), None);
@@ -230,7 +337,7 @@ mod tests {
         /// A cursor over a single character can peek and advance once.
         #[test]
         fn test_single_char() {
-            let mut cursor = CommentCursor::new("a");
+            let mut cursor = RmsCursor::new("a");
             assert_eq!(cursor.peek(), Some('a'));
             assert_eq!(cursor.peek2(), None);
             assert_eq!(cursor.next(), Some('a'));
@@ -242,7 +349,7 @@ mod tests {
         /// A cursor over two characters can peek ahead by two and advance twice.
         #[test]
         fn test_two_chars() {
-            let mut cursor = CommentCursor::new("ab");
+            let mut cursor = RmsCursor::new("ab");
             assert_eq!(cursor.peek(), Some('a'));
             assert_eq!(cursor.peek2(), Some('b'));
             assert_eq!(cursor.next(), Some('a'));
@@ -255,7 +362,7 @@ mod tests {
         /// A cursor over three characters correctly transitions through all states.
         #[test]
         fn test_three_chars() {
-            let mut cursor = CommentCursor::new("abc");
+            let mut cursor = RmsCursor::new("abc");
             assert_eq!(cursor.peek(), Some('a'));
             assert_eq!(cursor.peek2(), Some('b'));
             assert_eq!(cursor.next(), Some('a'));
@@ -271,7 +378,7 @@ mod tests {
         /// A cursor over a longer string has correct state at initialization.
         #[test]
         fn test_longer_string_init() {
-            let cursor = CommentCursor::new("hello world");
+            let cursor = RmsCursor::new("hello world");
             assert_eq!(cursor.peek(), Some('h'));
             assert_eq!(cursor.peek2(), Some('e'));
         }
@@ -279,7 +386,7 @@ mod tests {
         /// A cursor over a longer string has correct state in the middle.
         #[test]
         fn test_longer_string_middle() {
-            let mut cursor = CommentCursor::new("hello world");
+            let mut cursor = RmsCursor::new("hello world");
             for _ in 0..5 {
                 cursor.next();
             }
@@ -290,7 +397,7 @@ mod tests {
         /// A cursor over a longer string has correct state at the end.
         #[test]
         fn test_longer_string_end() {
-            let mut cursor = CommentCursor::new("hello");
+            let mut cursor = RmsCursor::new("hello");
             for _ in 0..4 {
                 cursor.next();
             }
@@ -306,7 +413,7 @@ mod tests {
         /// byte offset after advancing past it.
         #[test]
         fn test_unicode_char_offset() {
-            let mut cursor = CommentCursor::new("é");
+            let mut cursor = RmsCursor::new("é");
             assert_eq!(cursor.peek(), Some('é'));
             assert_eq!(cursor.next(), Some('é'));
             assert_eq!(cursor.next(), None);
@@ -315,7 +422,7 @@ mod tests {
         /// A cursor correctly peeks past a multi-byte Unicode character.
         #[test]
         fn test_unicode_peek2() {
-            let cursor = CommentCursor::new("éa");
+            let cursor = RmsCursor::new("éa");
             assert_eq!(cursor.peek(), Some('é'));
             assert_eq!(cursor.peek2(), Some('a'));
         }
@@ -324,7 +431,7 @@ mod tests {
         /// ASCII has correct offsets throughout.
         #[test]
         fn test_unicode_then_ascii() {
-            let mut cursor = CommentCursor::new("héllo");
+            let mut cursor = RmsCursor::new("héllo");
             assert_eq!(cursor.next(), Some('h'));
             assert_eq!(cursor.next(), Some('é'));
             assert_eq!(cursor.next(), Some('l'));
@@ -333,14 +440,14 @@ mod tests {
         /// A cursor at the start of `/* comment */` detects a comment opener.
         #[test]
         fn test_comment_open_basic() {
-            let cursor = CommentCursor::new("/* comment */");
+            let cursor = RmsCursor::new("/* comment */");
             assert!(cursor.is_comment_open());
         }
 
         /// A comment opener not preceded by whitespace is not detected.
         #[test]
         fn test_comment_open_no_preceding_whitespace() {
-            let mut cursor = CommentCursor::new("a/* comment */");
+            let mut cursor = RmsCursor::new("a/* comment */");
             cursor.next();
             assert!(!cursor.is_comment_open());
         }
@@ -348,21 +455,21 @@ mod tests {
         /// A comment opener not followed by whitespace is not detected.
         #[test]
         fn test_comment_open_no_following_whitespace() {
-            let cursor = CommentCursor::new("/*comment */");
+            let cursor = RmsCursor::new("/*comment */");
             assert!(!cursor.is_comment_open());
         }
 
         /// A comment opener at end of file is detected.
         #[test]
         fn test_comment_open_at_eof() {
-            let cursor = CommentCursor::new("/*");
+            let cursor = RmsCursor::new("/*");
             assert!(cursor.is_comment_open());
         }
 
         /// A comment opener preceded by whitespace mid-text is detected.
         #[test]
         fn test_comment_open_after_whitespace() {
-            let mut cursor = CommentCursor::new(" /* comment */");
+            let mut cursor = RmsCursor::new(" /* comment */");
             cursor.next();
             assert!(cursor.is_comment_open());
         }
@@ -370,14 +477,14 @@ mod tests {
         /// A plain `/` not followed by `*` is not a comment opener.
         #[test]
         fn test_comment_open_plain_slash() {
-            let cursor = CommentCursor::new("/ something");
+            let cursor = RmsCursor::new("/ something");
             assert!(!cursor.is_comment_open());
         }
 
         /// A cursor at `*/` preceded by whitespace detects a comment closer.
         #[test]
         fn test_comment_close_basic() {
-            let mut cursor = CommentCursor::new("/* x */ rest");
+            let mut cursor = RmsCursor::new("/* x */ rest");
             cursor.next(); // /
             cursor.next(); // *
             cursor.next(); // ' '
@@ -389,7 +496,7 @@ mod tests {
         /// A comment closer not preceded by whitespace is not detected.
         #[test]
         fn test_comment_close_no_preceding_whitespace() {
-            let mut cursor = CommentCursor::new("/* x*/ rest");
+            let mut cursor = RmsCursor::new("/* x*/ rest");
             cursor.next(); // /
             cursor.next(); // *
             cursor.next(); // ' '
@@ -400,7 +507,7 @@ mod tests {
         /// A comment closer not followed by whitespace is not detected.
         #[test]
         fn test_comment_close_no_following_whitespace() {
-            let mut cursor = CommentCursor::new("/* x */rest");
+            let mut cursor = RmsCursor::new("/* x */rest");
             cursor.next(); // /
             cursor.next(); // *
             cursor.next(); // ' '
@@ -412,13 +519,139 @@ mod tests {
         /// A comment closer at end of file is detected.
         #[test]
         fn test_comment_close_at_eof() {
-            let mut cursor = CommentCursor::new("/* x */");
+            let mut cursor = RmsCursor::new("/* x */");
             cursor.next(); // /
             cursor.next(); // *
             cursor.next(); // ' '
             cursor.next(); // x
             cursor.next(); // ' '
             assert!(cursor.is_comment_close());
+        }
+
+        /// A cursor at `{` preceded by whitespace detects an open brace.
+        #[test]
+        fn test_open_brace_basic() {
+            let mut cursor = RmsCursor::new("create_land {");
+            for _ in 0.."create_land ".len() {
+                cursor.next();
+            }
+            assert!(cursor.is_open_brace());
+        }
+
+        /// An open brace not preceded by whitespace is not detected.
+        #[test]
+        fn test_open_brace_no_preceding_whitespace() {
+            let mut cursor = RmsCursor::new("a{");
+            assert_eq!(cursor.next(), Some('a'));
+            assert!(!cursor.is_open_brace());
+        }
+
+        /// An open brace not followed by whitespace is not detected.
+        #[test]
+        fn test_open_brace_no_following_whitespace() {
+            let cursor = RmsCursor::new("{a");
+            assert!(!cursor.is_open_brace());
+        }
+
+        /// An open brace at end of file is detected.
+        #[test]
+        fn test_open_brace_at_eof() {
+            let cursor = RmsCursor::new("{");
+            assert!(cursor.is_open_brace());
+        }
+
+        /// An open brace at the start of file is detected.
+        #[test]
+        fn test_open_brace_start_of_file() {
+            let cursor = RmsCursor::new("{ ");
+            assert!(cursor.is_open_brace());
+        }
+
+        /// A cursor at `}` preceded by whitespace detects a close brace.
+        #[test]
+        fn test_close_brace_basic() {
+            let mut cursor = RmsCursor::new("{ foo }");
+            assert_eq!(cursor.next(), Some('{'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert_eq!(cursor.next(), Some('f'));
+            assert_eq!(cursor.next(), Some('o'));
+            assert_eq!(cursor.next(), Some('o'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert!(cursor.is_close_brace());
+        }
+
+        /// A close brace not preceded by whitespace is not detected.
+        #[test]
+        fn test_close_brace_no_preceding_whitespace() {
+            let mut cursor = RmsCursor::new("{ foo}");
+            assert_eq!(cursor.next(), Some('{'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert_eq!(cursor.next(), Some('f'));
+            assert_eq!(cursor.next(), Some('o'));
+            assert_eq!(cursor.next(), Some('o'));
+            assert!(!cursor.is_close_brace());
+        }
+
+        /// A close brace not followed by whitespace is not detected.
+        #[test]
+        fn test_close_brace_no_following_whitespace() {
+            let mut cursor = RmsCursor::new("{ foo }bar");
+            assert_eq!(cursor.next(), Some('{'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert_eq!(cursor.next(), Some('f'));
+            assert_eq!(cursor.next(), Some('o'));
+            assert_eq!(cursor.next(), Some('o'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert!(!cursor.is_close_brace());
+        }
+
+        /// A close brace at end of file is detected.
+        #[test]
+        fn test_close_brace_at_eof() {
+            let mut cursor = RmsCursor::new("{ foo }");
+            assert_eq!(cursor.next(), Some('{'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert_eq!(cursor.next(), Some('f'));
+            assert_eq!(cursor.next(), Some('o'));
+            assert_eq!(cursor.next(), Some('o'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert!(cursor.is_close_brace());
+        }
+
+        /// A close brace at the start of file is detected.
+        #[test]
+        fn test_close_brace_start_of_file() {
+            let cursor = RmsCursor::new("} ");
+            assert!(cursor.is_close_brace());
+        }
+
+        /// Advancing through a string with interleaved braces detects them correctly
+        /// at each position, including consecutive and nested braces.
+        #[test]
+        fn test_interleaved_braces() {
+            let mut cursor = RmsCursor::new("} { { } } {");
+            assert!(cursor.is_close_brace());
+            assert!(!cursor.is_open_brace());
+            assert_eq!(cursor.next(), Some('}'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert!(cursor.is_open_brace());
+            assert!(!cursor.is_close_brace());
+            assert_eq!(cursor.next(), Some('{'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert!(cursor.is_open_brace());
+            assert!(!cursor.is_close_brace());
+            assert_eq!(cursor.next(), Some('{'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert!(cursor.is_close_brace());
+            assert!(!cursor.is_open_brace());
+            assert_eq!(cursor.next(), Some('}'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert!(cursor.is_close_brace());
+            assert!(!cursor.is_open_brace());
+            assert_eq!(cursor.next(), Some('}'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert!(cursor.is_open_brace());
+            assert!(!cursor.is_close_brace());
         }
     }
 
