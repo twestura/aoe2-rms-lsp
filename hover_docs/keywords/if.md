@@ -12,10 +12,10 @@ endif
 
 Include a block of code if a condition holds.
 
-- `if` is required to start the block
-- `elseif` is optional and may be included any number of times
-- `else` is optional
-- `endif` is required to end the block
+- `if` is required to start the block.
+- `elseif` is optional and may be included any number of times.
+- `else` is optional.
+- `endif` is required to end the block.
 
 The conditions are checked in order from top to bottom.
 The if statement uses the code block of the first valid condition.
