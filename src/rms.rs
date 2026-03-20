@@ -7,11 +7,6 @@ use tower_lsp::lsp_types::Position;
 pub struct DocumentContext {
     /// Whether the position falls within a block comment.
     pub in_comment: bool,
-    /// Whether the position falls within a `{ }` block.
-    /// `true` if the most recently seen whitespace-delimited brace before
-    /// this position was `{`, `false` if it was `}` or no brace has been seen.
-    pub in_block: bool,
-    // TODO unnecessary to track `in_block` now.
 }
 
 /// Returns the `DocumentContext` at the given position in `text`.
@@ -33,48 +28,21 @@ pub struct DocumentContext {
 /// [LSP specification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position)
 /// for position encoding details.
 pub fn document_context_at(text: &str, position: Position) -> DocumentContext {
-    // let Some(offset) = position_to_offset(text, position) else {
-    //     return false; // invalid position, not in a comment
-    // };
-    // let mut depth = 0;
-    // let mut cursor = RmsCursor::new(text);
-    // for _ in 0..offset {
-    //     if cursor.is_comment_open() {
-    //         depth += 1;
-    //     } else if cursor.is_comment_close() && depth > 0 {
-    //         depth -= 1;
-    //     }
-    //     cursor.next();
-    // }
-    // depth > 0 || cursor.is_comment_open() || cursor.is_comment_close()
     let Some(offset) = position_to_offset(text, position) else {
-        return DocumentContext {
-            in_comment: false,
-            in_block: false,
-        };
+        return DocumentContext { in_comment: false };
     };
     let mut cursor = RmsCursor::new(text);
     let mut depth = 0;
-    let mut in_block = false;
     for _ in 0..offset {
         if cursor.is_comment_open() {
             depth += 1;
         } else if cursor.is_comment_close() && depth > 0 {
             depth -= 1;
-        } else if depth == 0 {
-            if cursor.is_open_brace() {
-                in_block = true;
-            } else if cursor.is_close_brace() {
-                in_block = false;
-            }
         }
         cursor.next();
     }
     let in_comment = depth > 0 || cursor.is_comment_open() || cursor.is_comment_close();
-    DocumentContext {
-        in_comment,
-        in_block,
-    }
+    DocumentContext { in_comment }
 }
 
 /// A cursor for scanning RMS text that tracks whitespace context
@@ -147,32 +115,6 @@ impl<'a> RmsCursor<'a> {
                 .map(|c| c.is_ascii_whitespace())
                 .unwrap_or(true)
     }
-
-    /// Returns `true` if the current position is a valid open brace `{`,
-    /// preceded by whitespace or start of file, and followed by whitespace
-    /// or EOF.
-    fn is_open_brace(&self) -> bool {
-        self.peek() == Some('{')
-            && self.prev_ws
-            && self.text[self.offset..]
-                .chars()
-                .nth(1)
-                .map(|c| c.is_ascii_whitespace())
-                .unwrap_or(true)
-    }
-
-    /// Returns `true` if the current position is a valid close brace `}`,
-    /// preceded by whitespace or start of file, and followed by whitespace
-    /// or EOF.
-    fn is_close_brace(&self) -> bool {
-        self.peek() == Some('}')
-            && self.prev_ws
-            && self.text[self.offset..]
-                .chars()
-                .nth(1)
-                .map(|c| c.is_ascii_whitespace())
-                .unwrap_or(true)
-    }
 }
 
 /// Given a UTF-8 encoded string `text` and a `Position` (line, character),
@@ -226,10 +168,7 @@ mod tests {
             let text = "hello";
             assert_eq!(
                 document_context_at(text, Position::new(5, 0)),
-                DocumentContext {
-                    in_comment: false,
-                    in_block: false
-                }
+                DocumentContext { in_comment: false }
             );
         }
 
@@ -239,10 +178,7 @@ mod tests {
             let text = "<LAND_GENERATION>\ncreate_land {\nterrain_type GRASS\n}";
             assert_eq!(
                 document_context_at(text, Position::new(2, 0)),
-                DocumentContext {
-                    in_comment: false,
-                    in_block: true
-                }
+                DocumentContext { in_comment: false }
             );
         }
 
@@ -315,10 +251,7 @@ mod tests {
             let text = "/* { */ base_terrain";
             assert_eq!(
                 document_context_at(text, Position::new(0, 8)),
-                DocumentContext {
-                    in_comment: false,
-                    in_block: false
-                }
+                DocumentContext { in_comment: false }
             );
         }
     }
@@ -527,132 +460,6 @@ mod tests {
             cursor.next(); // x
             cursor.next(); // ' '
             assert!(cursor.is_comment_close());
-        }
-
-        /// A cursor at `{` preceded by whitespace detects an open brace.
-        #[test]
-        fn test_open_brace_basic() {
-            let mut cursor = RmsCursor::new("create_land {");
-            for _ in 0.."create_land ".len() {
-                cursor.next();
-            }
-            assert!(cursor.is_open_brace());
-        }
-
-        /// An open brace not preceded by whitespace is not detected.
-        #[test]
-        fn test_open_brace_no_preceding_whitespace() {
-            let mut cursor = RmsCursor::new("a{");
-            assert_eq!(cursor.next(), Some('a'));
-            assert!(!cursor.is_open_brace());
-        }
-
-        /// An open brace not followed by whitespace is not detected.
-        #[test]
-        fn test_open_brace_no_following_whitespace() {
-            let cursor = RmsCursor::new("{a");
-            assert!(!cursor.is_open_brace());
-        }
-
-        /// An open brace at end of file is detected.
-        #[test]
-        fn test_open_brace_at_eof() {
-            let cursor = RmsCursor::new("{");
-            assert!(cursor.is_open_brace());
-        }
-
-        /// An open brace at the start of file is detected.
-        #[test]
-        fn test_open_brace_start_of_file() {
-            let cursor = RmsCursor::new("{ ");
-            assert!(cursor.is_open_brace());
-        }
-
-        /// A cursor at `}` preceded by whitespace detects a close brace.
-        #[test]
-        fn test_close_brace_basic() {
-            let mut cursor = RmsCursor::new("{ foo }");
-            assert_eq!(cursor.next(), Some('{'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert_eq!(cursor.next(), Some('f'));
-            assert_eq!(cursor.next(), Some('o'));
-            assert_eq!(cursor.next(), Some('o'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert!(cursor.is_close_brace());
-        }
-
-        /// A close brace not preceded by whitespace is not detected.
-        #[test]
-        fn test_close_brace_no_preceding_whitespace() {
-            let mut cursor = RmsCursor::new("{ foo}");
-            assert_eq!(cursor.next(), Some('{'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert_eq!(cursor.next(), Some('f'));
-            assert_eq!(cursor.next(), Some('o'));
-            assert_eq!(cursor.next(), Some('o'));
-            assert!(!cursor.is_close_brace());
-        }
-
-        /// A close brace not followed by whitespace is not detected.
-        #[test]
-        fn test_close_brace_no_following_whitespace() {
-            let mut cursor = RmsCursor::new("{ foo }bar");
-            assert_eq!(cursor.next(), Some('{'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert_eq!(cursor.next(), Some('f'));
-            assert_eq!(cursor.next(), Some('o'));
-            assert_eq!(cursor.next(), Some('o'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert!(!cursor.is_close_brace());
-        }
-
-        /// A close brace at end of file is detected.
-        #[test]
-        fn test_close_brace_at_eof() {
-            let mut cursor = RmsCursor::new("{ foo }");
-            assert_eq!(cursor.next(), Some('{'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert_eq!(cursor.next(), Some('f'));
-            assert_eq!(cursor.next(), Some('o'));
-            assert_eq!(cursor.next(), Some('o'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert!(cursor.is_close_brace());
-        }
-
-        /// A close brace at the start of file is detected.
-        #[test]
-        fn test_close_brace_start_of_file() {
-            let cursor = RmsCursor::new("} ");
-            assert!(cursor.is_close_brace());
-        }
-
-        /// Advancing through a string with interleaved braces detects them correctly
-        /// at each position, including consecutive and nested braces.
-        #[test]
-        fn test_interleaved_braces() {
-            let mut cursor = RmsCursor::new("} { { } } {");
-            assert!(cursor.is_close_brace());
-            assert!(!cursor.is_open_brace());
-            assert_eq!(cursor.next(), Some('}'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert!(cursor.is_open_brace());
-            assert!(!cursor.is_close_brace());
-            assert_eq!(cursor.next(), Some('{'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert!(cursor.is_open_brace());
-            assert!(!cursor.is_close_brace());
-            assert_eq!(cursor.next(), Some('{'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert!(cursor.is_close_brace());
-            assert!(!cursor.is_open_brace());
-            assert_eq!(cursor.next(), Some('}'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert!(cursor.is_close_brace());
-            assert!(!cursor.is_open_brace());
-            assert_eq!(cursor.next(), Some('}'));
-            assert_eq!(cursor.next(), Some(' '));
-            assert!(cursor.is_open_brace());
-            assert!(!cursor.is_close_brace());
         }
     }
 
