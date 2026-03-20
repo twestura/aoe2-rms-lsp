@@ -254,10 +254,10 @@ fn lookup_hover(token: &str, in_block: bool) -> Option<&'static str> {
         "generate_mode" => Some(include_str!("../hover_docs/attributes/generate-mode.md")),
         "land_position" => Some(include_str!("../hover_docs/attributes/land-position.md")),
         "circle_radius" => Some(include_str!("../hover_docs/attributes/circle-radius.md")),
-        "left_border" => Some(include_str!("../hover_docs/attributes/left-border.md")),
-        "right_border" => Some(include_str!("../hover_docs/attributes/right-border.md")),
-        "top_border" => Some(include_str!("../hover_docs/attributes/top-border.md")),
-        "bottom_border" => Some(include_str!("../hover_docs/attributes/bottom-border.md")),
+        "left_border" => Some(include_str!("../hover_docs/attributes/borders.md")),
+        "right_border" => Some(include_str!("../hover_docs/attributes/borders.md")),
+        "top_border" => Some(include_str!("../hover_docs/attributes/borders.md")),
+        "bottom_border" => Some(include_str!("../hover_docs/attributes/borders.md")),
         "border_fuzziness" => Some(include_str!("../hover_docs/attributes/border-fuzziness.md")),
         "clumping_factor" => Some(include_str!("../hover_docs/attributes/clumping-factor.md")),
         "land_conformity" => Some(include_str!("../hover_docs/attributes/land-conformity.md")),
@@ -359,10 +359,10 @@ fn lookup_hover(token: &str, in_block: bool) -> Option<&'static str> {
             "../hover_docs/attributes/make-indestructible.md"
         )),
         "min_distance_to_players" => Some(include_str!(
-            "../hover_docs/attributes/min-distance-to-players.md"
+            "../hover_docs/attributes/distance-to-players.md"
         )),
         "max_distance_to_players" => Some(include_str!(
-            "../hover_docs/attributes/max-distance-to-players.md"
+            "../hover_docs/attributes/distance-to-players.md"
         )),
         "set_circular_placement" => Some(include_str!(
             "../hover_docs/attributes/set-circular-placement.md"
