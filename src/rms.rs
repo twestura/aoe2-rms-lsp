@@ -12,17 +12,12 @@ pub struct DocumentContext {
 /// Returns the `DocumentContext` at the given position in `text`.
 ///
 /// Scans the document from the start to `position` in a single pass,
-/// tracking comment depth and the most recently seen whitespace-delimited
-/// brace.
+/// tracking comment depth.
 ///
 /// - `in_comment` is `true` if the position falls within a block comment
 ///   or on a comment delimiter.
-/// - `in_block` is `true` if the most recently seen whitespace-delimited
-///   brace before `position` was `{`, `false` if it was `}` or no brace
-///   has been seen.
-/// - Braces inside comments are ignored.
-/// - Returns a context with both fields `false` if `position` is out of
-///   bounds.
+/// - Returns a context with `in_comment` set to `false` if `position` is out
+///   of bounds.
 ///
 /// See the
 /// [LSP specification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#position)
