@@ -11,6 +11,7 @@ pub struct DocumentContext {
     /// `true` if the most recently seen whitespace-delimited brace before
     /// this position was `{`, `false` if it was `}` or no brace has been seen.
     pub in_block: bool,
+    // TODO unnecessary to track `in_block` now.
 }
 
 /// Returns the `DocumentContext` at the given position in `text`.

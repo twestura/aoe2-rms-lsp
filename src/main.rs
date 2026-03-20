@@ -122,7 +122,7 @@ fn get_hover_text(text: &str, position: Position) -> Option<&'static str> {
         return None;
     }
     let token = extract_token(text, position)?;
-    lookup_hover(token, context.in_block)
+    lookup_hover(token)
 }
 
 /// Extracts the token at the given position from the text.
@@ -150,10 +150,8 @@ fn extract_token(text: &str, position: Position) -> Option<&str> {
 }
 
 /// Returns the hover content for the given token, or `None` if the token does
-/// not have hover data. `in_block` is used to determine if the token is inside
-/// a block, which affects which hover content is returned for `base_terrain`
-/// and `base_layer`.
-fn lookup_hover(token: &str, in_block: bool) -> Option<&'static str> {
+/// not have hover data.
+fn lookup_hover(token: &str) -> Option<&'static str> {
     match token {
         // Sections
         "<PLAYER_SETUP>" => Some(include_str!("../hover_docs/sections/player-setup.md")),
@@ -423,9 +421,13 @@ fn lookup_hover(token: &str, in_block: bool) -> Option<&'static str> {
         )),
         "set_facet" => Some(include_str!("../hover_docs/attributes/set-facet.md")),
         "match_player_civ" => Some(include_str!("../hover_docs/attributes/match-player-civ.md")),
-        // Ambiguous
-        "base_terrain" => lookup_base_terrain_hover(in_block),
-        "base_layer" => lookup_base_layer_hover(in_block),
+        // Ambiguous: Command-Attributes
+        "base_terrain" => Some(include_str!(
+            "../hover_docs/command-attributes/base-terrain.md"
+        )),
+        "base_layer" => Some(include_str!(
+            "../hover_docs/command-attributes/base-layer.md"
+        )),
         // Keywords
         "else" => Some(include_str!("../hover_docs/keywords/else.md")),
         "if" => Some(include_str!("../hover_docs/keywords/if.md")),
@@ -440,23 +442,5 @@ fn lookup_hover(token: &str, in_block: bool) -> Option<&'static str> {
         "#include-drs" => Some(include_str!("../hover_docs/keywords/include-drs.md")),
         "#includexs" => Some(include_str!("../hover_docs/keywords/includexs.md")),
         _ => None,
-    }
-}
-
-/// Returns the hover content for `base_terrain`.
-fn lookup_base_terrain_hover(in_block: bool) -> Option<&'static str> {
-    if in_block {
-        Some(include_str!("../hover_docs/attributes/base-terrain.md"))
-    } else {
-        Some(include_str!("../hover_docs/commands/base-terrain.md"))
-    }
-}
-
-/// Returns the hover content for `base_layer`.
-fn lookup_base_layer_hover(in_block: bool) -> Option<&'static str> {
-    if in_block {
-        Some(include_str!("../hover_docs/attributes/base-layer.md"))
-    } else {
-        Some(include_str!("../hover_docs/commands/base-layer.md"))
     }
 }
