@@ -645,13 +645,22 @@ fn get_completions(text: &str, position: Position) -> Option<Vec<CompletionItem>
         },
     };
     let full = completion_text.token.to_lowercase();
-    let prefix_end =
-        (position.character as usize - completion_text.left).min(completion_text.token.len());
-    let prefix = completion_text.token[..prefix_end].to_lowercase();
-    Some(
-        COMPLETABLE_TOKENS
+    let mut matches: Vec<&CompletableToken> = COMPLETABLE_TOKENS
+        .iter()
+        .filter(|token| token.lower.contains(&full))
+        .collect();
+    if matches.is_empty() {
+        let prefix_end =
+            (position.character as usize - completion_text.left).min(completion_text.token.len());
+        let prefix = completion_text.token[..prefix_end].to_lowercase();
+        matches = COMPLETABLE_TOKENS
             .iter()
-            .filter(|token| token.lower.contains(&full) || token.lower.contains(&prefix))
+            .filter(|token| token.lower.contains(&prefix))
+            .collect();
+    }
+    Some(
+        matches
+            .iter()
             .map(|token| CompletionItem {
                 documentation: lookup_hover(token.label).map(|doc| {
                     Documentation::MarkupContent(MarkupContent {
