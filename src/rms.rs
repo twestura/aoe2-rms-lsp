@@ -1,6 +1,6 @@
 //! Utility functions for .rms file parsing.
 
-use tower_lsp::lsp_types::Position;
+use tower_lsp::lsp_types::{Position, Range};
 
 /// The context of a position within an RMS document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -184,17 +184,48 @@ pub fn extract_token(text: &str, position: Position) -> Option<&str> {
 /// The result of extracting a completion text at a cursor position.
 /// Note the returned token may be empty if the cursor's position is
 /// within two consecutive whitespace characters.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CompletionText<'a> {
-    /// The text to use for filtering completions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionText {
+    /// The lowercase text to use for filtering completions.
     /// `token == &line[left..right]`, where `line` is the line of text
     /// containing the token.
     /// Empty when `left == right`.
-    pub token: &'a str,
-    /// The byte index of the start of the token on the line, inclusive.
-    pub left: usize,
-    /// The byte index of the end of the token on the line, exclusive.
-    pub right: usize,
+    pub text: String,
+    /// The prefix of the token up to the cursor position.
+    /// All lowercase.
+    /// Must be a prefix of `text`.
+    pub prefix: String,
+    /// The range of the token in the document.
+    pub range: Range,
+}
+
+impl CompletionText {
+    /// Creates a new `CompletionText` from a line of text and cursor position,
+    /// where `line[left..right]` is the full token at the cursor.
+    ///
+    /// Requires `left <= right` and `left <= position.character`.
+    fn new(line: &str, left: usize, right: usize, position: Position) -> Self {
+        debug_assert!(left <= right);
+        debug_assert!(left as u32 <= position.character);
+
+        let text = line[left..right].to_lowercase();
+        let prefix = line[left..right.min(position.character as usize)].to_lowercase();
+        let range = Range {
+            start: Position {
+                line: position.line,
+                character: left as u32,
+            },
+            end: Position {
+                line: position.line,
+                character: right as u32,
+            },
+        };
+        Self {
+            text,
+            prefix,
+            range,
+        }
+    }
 }
 
 /// Extracts the autocomplete text for the given position in the text.
@@ -202,10 +233,7 @@ pub struct CompletionText<'a> {
 /// - If the position is on a whitespace character preceded immediately by
 ///   text, returns the text.
 /// - Returns `None` if the `position` is out of bounds.
-pub fn extract_autocomplete_prefix<'a>(
-    text: &'a str,
-    position: Position,
-) -> Option<CompletionText<'a>> {
+pub fn extract_autocomplete_prefix(text: &str, position: Position) -> Option<CompletionText> {
     let line = text.split("\n").nth(position.line as usize)?;
     let col = position.character as usize;
     // The column index is out of bounds.
@@ -223,11 +251,7 @@ pub fn extract_autocomplete_prefix<'a>(
         right += 1;
     }
 
-    Some(CompletionText {
-        token: &line[left..right],
-        left,
-        right,
-    })
+    Some(CompletionText::new(line, left, right, position))
 }
 
 #[cfg(test)]
@@ -812,9 +836,12 @@ mod tests {
             assert_eq!(
                 extract_autocomplete_prefix(text, Position::new(0, 5)),
                 Some(CompletionText {
-                    token: "create_land",
-                    left: 0,
-                    right: 11
+                    text: "create_land".to_string(),
+                    prefix: "creat".to_string(),
+                    range: Range {
+                        start: Position::new(0, 0),
+                        end: Position::new(0, 11),
+                    },
                 })
             );
         }
@@ -826,9 +853,12 @@ mod tests {
             assert_eq!(
                 extract_autocomplete_prefix(text, Position::new(0, 0)),
                 Some(CompletionText {
-                    token: "create_land",
-                    left: 0,
-                    right: 11
+                    text: "create_land".to_string(),
+                    prefix: "".to_string(),
+                    range: Range {
+                        start: Position::new(0, 0),
+                        end: Position::new(0, 11),
+                    },
                 })
             );
         }
@@ -840,9 +870,12 @@ mod tests {
             assert_eq!(
                 extract_autocomplete_prefix(text, Position::new(0, 10)),
                 Some(CompletionText {
-                    token: "create_land",
-                    left: 0,
-                    right: 11
+                    text: "create_land".to_string(),
+                    prefix: "create_lan".to_string(),
+                    range: Range {
+                        start: Position::new(0, 0),
+                        end: Position::new(0, 11),
+                    },
                 })
             );
         }
@@ -854,9 +887,12 @@ mod tests {
             assert_eq!(
                 extract_autocomplete_prefix(text, Position::new(0, 3)),
                 Some(CompletionText {
-                    token: "abc",
-                    left: 0,
-                    right: 3
+                    text: "abc".to_string(),
+                    prefix: "abc".to_string(),
+                    range: Range {
+                        start: Position::new(0, 0),
+                        end: Position::new(0, 3),
+                    },
                 })
             );
         }
@@ -868,9 +904,12 @@ mod tests {
             assert_eq!(
                 extract_autocomplete_prefix(text, Position::new(0, 4)),
                 Some(CompletionText {
-                    token: "",
-                    left: 4,
-                    right: 4
+                    text: "".to_string(),
+                    prefix: "".to_string(),
+                    range: Range {
+                        start: Position::new(0, 4),
+                        end: Position::new(0, 4),
+                    },
                 })
             );
         }
@@ -882,9 +921,12 @@ mod tests {
             assert_eq!(
                 extract_autocomplete_prefix(text, Position::new(0, 0)),
                 Some(CompletionText {
-                    token: "",
-                    left: 0,
-                    right: 0
+                    text: "".to_string(),
+                    prefix: "".to_string(),
+                    range: Range {
+                        start: Position::new(0, 0),
+                        end: Position::new(0, 0),
+                    },
                 })
             );
         }
@@ -896,9 +938,12 @@ mod tests {
             assert_eq!(
                 extract_autocomplete_prefix(text, Position::new(1, 5)),
                 Some(CompletionText {
-                    token: "terrain_type",
-                    left: 0,
-                    right: 12
+                    text: "terrain_type".to_string(),
+                    prefix: "terra".to_string(),
+                    range: Range {
+                        start: Position::new(1, 0),
+                        end: Position::new(1, 12),
+                    },
                 })
             );
         }
@@ -910,9 +955,12 @@ mod tests {
             assert_eq!(
                 extract_autocomplete_prefix(text, Position::new(1, 12)),
                 Some(CompletionText {
-                    token: "terrain_type",
-                    left: 0,
-                    right: 12
+                    text: "terrain_type".to_string(),
+                    prefix: "terrain_type".to_string(),
+                    range: Range {
+                        start: Position::new(1, 0),
+                        end: Position::new(1, 12),
+                    },
                 })
             );
         }
@@ -924,9 +972,12 @@ mod tests {
             assert_eq!(
                 extract_autocomplete_prefix(text, Position::new(0, 0)),
                 Some(CompletionText {
-                    token: "abc\u{00A0}def",
-                    left: 0,
-                    right: 8
+                    text: "abc\u{00A0}def".to_string(),
+                    prefix: "".to_string(),
+                    range: Range {
+                        start: Position::new(0, 0),
+                        end: Position::new(0, 8),
+                    },
                 })
             );
         }
