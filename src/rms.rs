@@ -149,6 +149,87 @@ fn position_to_offset(text: &str, position: Position) -> Option<usize> {
     (current_lineno == position.line).then_some(text.len())
 }
 
+/// Extracts the token at the given position from the text.
+/// Returns `Some(token)` if the position is within text.
+/// Otherwise returns `None` if the position is within whitespace.
+///
+/// Only ascii whitespace is considered whitespace, consistent with RMS.
+/// Returns `None` if the position is out of bounds.
+pub fn extract_token(text: &str, position: Position) -> Option<&str> {
+    let line = text.split("\n").nth(position.line as usize)?;
+    let col = position.character as usize;
+    if col > line.len() {
+        return None;
+    }
+
+    let right = line[col..]
+        .find(|c: char| c.is_ascii_whitespace())
+        .map(|i| i + col)
+        .unwrap_or(line.len());
+    // Return `None` if `col` is the index of a whitespace character.
+    if right == col {
+        return None;
+    }
+    let left = line[..col]
+        .rfind(|c: char| c.is_ascii_whitespace())
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    debug_assert_ne!(
+        left, right,
+        "right > left because the first character is not whitespace"
+    );
+    Some(&line[left..right])
+}
+
+/// The result of extracting a completion text at a cursor position.
+/// Note the returned token may be empty if the cursor's position is
+/// within two consecutive whitespace characters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CompletionText<'a> {
+    /// The text to use for filtering completions.
+    /// `token == &line[left..right]`, where `line` is the line of text
+    /// containing the token.
+    /// Empty when `left == right`.
+    pub token: &'a str,
+    /// The byte index of the start of the token on the line, inclusive.
+    pub left: usize,
+    /// The byte index of the end of the token on the line, exclusive.
+    pub right: usize,
+}
+
+/// Extracts the autocomplete text for the given position in the text.
+/// - If the position is within text, returns the entire text.
+/// - If the position is on a whitespace character preceded immediately by
+///   text, returns the text.
+/// - Returns `None` if the `position` is out of bounds.
+pub fn extract_autocomplete_prefix<'a>(
+    text: &'a str,
+    position: Position,
+) -> Option<CompletionText<'a>> {
+    let line = text.split("\n").nth(position.line as usize)?;
+    let col = position.character as usize;
+    // The column index is out of bounds.
+    if col > line.len() {
+        return None;
+    }
+
+    let bytes = line.as_bytes();
+    let mut left = col;
+    while left > 0 && !bytes[left - 1].is_ascii_whitespace() {
+        left -= 1;
+    }
+    let mut right = col;
+    while right < line.len() && !bytes[right].is_ascii_whitespace() {
+        right += 1;
+    }
+
+    Some(CompletionText {
+        token: &line[left..right],
+        left,
+        right,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,11 +495,11 @@ mod tests {
         #[test]
         fn test_comment_close_basic() {
             let mut cursor = RmsCursor::new("/* x */ rest");
-            cursor.next(); // /
-            cursor.next(); // *
-            cursor.next(); // ' '
-            cursor.next(); // x
-            cursor.next(); // ' '
+            assert_eq!(cursor.next(), Some('/'));
+            assert_eq!(cursor.next(), Some('*'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert_eq!(cursor.next(), Some('x'));
+            assert_eq!(cursor.next(), Some(' '));
             assert!(cursor.is_comment_close());
         }
 
@@ -426,10 +507,10 @@ mod tests {
         #[test]
         fn test_comment_close_no_preceding_whitespace() {
             let mut cursor = RmsCursor::new("/* x*/ rest");
-            cursor.next(); // /
-            cursor.next(); // *
-            cursor.next(); // ' '
-            cursor.next(); // x
+            assert_eq!(cursor.next(), Some('/'));
+            assert_eq!(cursor.next(), Some('*'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert_eq!(cursor.next(), Some('x'));
             assert!(!cursor.is_comment_close());
         }
 
@@ -437,11 +518,11 @@ mod tests {
         #[test]
         fn test_comment_close_no_following_whitespace() {
             let mut cursor = RmsCursor::new("/* x */rest");
-            cursor.next(); // /
-            cursor.next(); // *
-            cursor.next(); // ' '
-            cursor.next(); // x
-            cursor.next(); // ' '
+            assert_eq!(cursor.next(), Some('/'));
+            assert_eq!(cursor.next(), Some('*'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert_eq!(cursor.next(), Some('x'));
+            assert_eq!(cursor.next(), Some(' '));
             assert!(!cursor.is_comment_close());
         }
 
@@ -449,11 +530,11 @@ mod tests {
         #[test]
         fn test_comment_close_at_eof() {
             let mut cursor = RmsCursor::new("/* x */");
-            cursor.next(); // /
-            cursor.next(); // *
-            cursor.next(); // ' '
-            cursor.next(); // x
-            cursor.next(); // ' '
+            assert_eq!(cursor.next(), Some('/'));
+            assert_eq!(cursor.next(), Some('*'));
+            assert_eq!(cursor.next(), Some(' '));
+            assert_eq!(cursor.next(), Some('x'));
+            assert_eq!(cursor.next(), Some(' '));
             assert!(cursor.is_comment_close());
         }
     }
@@ -550,6 +631,321 @@ mod tests {
         fn test_offset_trailing_newline() {
             let text = "hello\n";
             assert_eq!(position_to_offset(text, Position::new(1, 0)), Some(6));
+        }
+    }
+
+    mod extract_token {
+        use super::*;
+
+        /// A position within a token returns that token.
+        #[test]
+        fn test_middle_of_token() {
+            let text = "create_land";
+            assert_eq!(
+                extract_token(text, Position::new(0, 5)),
+                Some("create_land")
+            );
+        }
+
+        /// A position on the first character of a token returns that token.
+        #[test]
+        fn test_first_character_of_token() {
+            let text = "create_land";
+            assert_eq!(
+                extract_token(text, Position::new(0, 0)),
+                Some("create_land")
+            );
+        }
+
+        /// A position on the last character of a token returns that token.
+        #[test]
+        fn test_last_character_of_token() {
+            let text = "create_land";
+            assert_eq!(
+                extract_token(text, Position::new(0, 10)),
+                Some("create_land")
+            );
+        }
+
+        /// A position within whitespace returns None.
+        #[test]
+        fn test_whitespace_returns_none() {
+            let text = "create_land   create_player_lands";
+            assert_eq!(extract_token(text, Position::new(0, 12)), None);
+        }
+
+        /// A position on the whitespace immediately after a token returns None.
+        #[test]
+        fn test_whitespace_immediately_after_token() {
+            let text = "abc def";
+            assert_eq!(extract_token(text, Position::new(0, 3)), None);
+        }
+
+        /// A position at the start of a line returns the first token.
+        #[test]
+        fn test_start_of_line() {
+            let text = "terrain_type GRASS";
+            assert_eq!(
+                extract_token(text, Position::new(0, 0)),
+                Some("terrain_type")
+            );
+        }
+
+        /// A position at the last character of the last token on a line returns that token.
+        #[test]
+        fn test_end_of_line() {
+            let text = "terrain_type GRASS";
+            assert_eq!(extract_token(text, Position::new(0, 17)), Some("GRASS"));
+        }
+
+        /// A position on the first token of a multi-token line returns that token.
+        #[test]
+        fn test_multi_token_line_first() {
+            let text = "terrain_type GRASS";
+            assert_eq!(
+                extract_token(text, Position::new(0, 5)),
+                Some("terrain_type")
+            );
+        }
+
+        /// A position on the second token of a multi-token line returns that token.
+        #[test]
+        fn test_multi_token_line_second() {
+            let text = "terrain_type GRASS";
+            assert_eq!(extract_token(text, Position::new(0, 13)), Some("GRASS"));
+        }
+
+        /// A position on a token on the second line returns that token.
+        #[test]
+        fn test_second_line_token() {
+            let text = "create_land {\nterrain_type GRASS\n}";
+            assert_eq!(
+                extract_token(text, Position::new(1, 0)),
+                Some("terrain_type")
+            );
+        }
+
+        /// A position on the second token of the second line returns that token.
+        #[test]
+        fn test_second_line_second_token() {
+            let text = "create_land {\nterrain_type GRASS\n}";
+            assert_eq!(extract_token(text, Position::new(1, 13)), Some("GRASS"));
+        }
+
+        /// A position on whitespace on the second line returns None.
+        #[test]
+        fn test_second_line_whitespace() {
+            let text = "create_land {\nterrain_type GRASS\n}";
+            assert_eq!(extract_token(text, Position::new(1, 12)), None);
+        }
+
+        /// A position on a token on the third line returns that token.
+        #[test]
+        fn test_third_line_token() {
+            let text = "create_land {\nterrain_type GRASS\nnumber_of_tiles 300\n}";
+            assert_eq!(
+                extract_token(text, Position::new(2, 0)),
+                Some("number_of_tiles")
+            );
+        }
+
+        /// A position on the first line is unaffected by content on later lines.
+        #[test]
+        fn test_first_line_unaffected_by_later_lines() {
+            let text = "create_land {\nterrain_type GRASS\n}";
+            assert_eq!(
+                extract_token(text, Position::new(0, 0)),
+                Some("create_land")
+            );
+        }
+
+        /// A non-breaking space is not treated as a token separator,
+        /// so it is included in the token.
+        #[test]
+        fn test_unicode_whitespace_not_a_separator() {
+            let text = "abc\u{00A0}def";
+            assert_eq!(
+                extract_token(text, Position::new(0, 0)),
+                Some("abc\u{00A0}def")
+            );
+        }
+
+        /// An ASCII space is treated as a token separator.
+        #[test]
+        fn test_ascii_space_is_a_separator() {
+            let text = "abc def";
+            assert_eq!(extract_token(text, Position::new(0, 0)), Some("abc"));
+        }
+
+        /// A tab is treated as a token separator.
+        #[test]
+        fn test_ascii_tab_is_a_separator() {
+            let text = "abc\tdef";
+            assert_eq!(extract_token(text, Position::new(0, 0)), Some("abc"));
+        }
+
+        /// A position within a token containing a non-breaking space returns the full token.
+        #[test]
+        fn test_cursor_within_token_with_unicode_whitespace() {
+            let text = "abc\u{00A0}def";
+            assert_eq!(
+                extract_token(text, Position::new(0, 5)),
+                Some("abc\u{00A0}def")
+            );
+        }
+
+        /// A character offset beyond the end of a line returns None.
+        #[test]
+        fn test_character_out_of_bounds() {
+            let text = "A{";
+            assert_eq!(extract_token(text, Position::new(0, 15)), None);
+        }
+    }
+
+    mod extract_autocomplete_prefix {
+        use super::*;
+
+        /// A position within a token returns the full token.
+        #[test]
+        fn test_within_token() {
+            let text = "create_land";
+            assert_eq!(
+                extract_autocomplete_prefix(text, Position::new(0, 5)),
+                Some(CompletionText {
+                    token: "create_land",
+                    left: 0,
+                    right: 11
+                })
+            );
+        }
+
+        /// A position on the first character of a token returns the full token.
+        #[test]
+        fn test_first_character_of_token() {
+            let text = "create_land";
+            assert_eq!(
+                extract_autocomplete_prefix(text, Position::new(0, 0)),
+                Some(CompletionText {
+                    token: "create_land",
+                    left: 0,
+                    right: 11
+                })
+            );
+        }
+
+        /// A position on the last character of a token returns the full token.
+        #[test]
+        fn test_last_character_of_token() {
+            let text = "create_land";
+            assert_eq!(
+                extract_autocomplete_prefix(text, Position::new(0, 10)),
+                Some(CompletionText {
+                    token: "create_land",
+                    left: 0,
+                    right: 11
+                })
+            );
+        }
+
+        /// A position on the whitespace immediately after a token returns the token.
+        #[test]
+        fn test_whitespace_immediately_after_token() {
+            let text = "abc def";
+            assert_eq!(
+                extract_autocomplete_prefix(text, Position::new(0, 3)),
+                Some(CompletionText {
+                    token: "abc",
+                    left: 0,
+                    right: 3
+                })
+            );
+        }
+
+        /// A position on the second whitespace after a token returns an empty token.
+        #[test]
+        fn test_whitespace_not_immediately_after_token() {
+            let text = "abc  def";
+            assert_eq!(
+                extract_autocomplete_prefix(text, Position::new(0, 4)),
+                Some(CompletionText {
+                    token: "",
+                    left: 4,
+                    right: 4
+                })
+            );
+        }
+
+        /// A position on leading whitespace returns an empty token.
+        #[test]
+        fn test_leading_whitespace() {
+            let text = "  abc";
+            assert_eq!(
+                extract_autocomplete_prefix(text, Position::new(0, 0)),
+                Some(CompletionText {
+                    token: "",
+                    left: 0,
+                    right: 0
+                })
+            );
+        }
+
+        /// A position on a token on the second line returns the full token.
+        #[test]
+        fn test_second_line_token() {
+            let text = "create_land {\nterrain_type GRASS\n}";
+            assert_eq!(
+                extract_autocomplete_prefix(text, Position::new(1, 5)),
+                Some(CompletionText {
+                    token: "terrain_type",
+                    left: 0,
+                    right: 12
+                })
+            );
+        }
+
+        /// A position on whitespace immediately after a token on the second line returns the token.
+        #[test]
+        fn test_second_line_whitespace_after_token() {
+            let text = "create_land {\nterrain_type GRASS\n}";
+            assert_eq!(
+                extract_autocomplete_prefix(text, Position::new(1, 12)),
+                Some(CompletionText {
+                    token: "terrain_type",
+                    left: 0,
+                    right: 12
+                })
+            );
+        }
+
+        /// A non-breaking space is not treated as a token separator.
+        #[test]
+        fn test_unicode_whitespace_not_a_separator() {
+            let text = "abc\u{00A0}def";
+            assert_eq!(
+                extract_autocomplete_prefix(text, Position::new(0, 0)),
+                Some(CompletionText {
+                    token: "abc\u{00A0}def",
+                    left: 0,
+                    right: 8
+                })
+            );
+        }
+
+        /// A line number beyond the end of the document returns None.
+        #[test]
+        fn test_line_out_of_bounds() {
+            let text = "create_land";
+            assert_eq!(extract_autocomplete_prefix(text, Position::new(1, 0)), None);
+        }
+
+        /// A character offset beyond the end of a line returns None.
+        #[test]
+        fn test_character_out_of_bounds() {
+            let text = "create_land";
+            assert_eq!(
+                extract_autocomplete_prefix(text, Position::new(0, 100)),
+                None
+            );
         }
     }
 }
