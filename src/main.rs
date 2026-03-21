@@ -27,7 +27,6 @@ use crate::rms::CompletionText;
 /// matching, their kinds for coloring and icons in the completion popup, and
 /// optional snippets for expanding to full syntax with placeholders.
 #[rustfmt::skip]
-#[rustfmt::skip]
 static COMPLETABLE_TOKENS: &[CompletableToken] = &[
     // Sections
     CompletableToken { label: "<PLAYER_SETUP>", lower: "<player_setup>", kind: CompletionItemKind::MODULE, snippet: None },
