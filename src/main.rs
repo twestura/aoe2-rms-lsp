@@ -1,6 +1,9 @@
 //! Aoe2 RMS Language Server
 
+mod arguments;
+mod instructions;
 mod rms;
+mod tokenizer;
 
 use std::collections::HashMap;
 
@@ -678,6 +681,13 @@ fn filter_tokens(completion_text: &CompletionText) -> Vec<&'static CompletableTo
 fn get_completions(text: &str, position: Position) -> Option<Vec<CompletionItem>> {
     // No autocomplete in comments.
     let context = rms::document_context_at(text, position);
+    // _log(&format!(
+    //     "get_completions pos=({},{}) in_comment={} in_arg_pos={}",
+    //     position.line,
+    //     position.character,
+    //     context.in_comment,
+    //     rms::is_in_argument_position(text, position)
+    // ));
     if context.in_comment {
         return None;
     }

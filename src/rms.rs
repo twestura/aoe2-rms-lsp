@@ -254,6 +254,98 @@ pub fn extract_autocomplete_prefix(text: &str, position: Position) -> Option<Com
     Some(CompletionText::new(line, left, right, position))
 }
 
+/// Returns `true` if the cursor is on whitespace at `position` in `text`,
+/// `false` otherwise. A cursor beyong the end of the line is not considered
+/// whitespace.
+// fn is_on_whitespace(text: &str, position: Position) -> bool {
+//     text.split('\n')
+//         .nth(position.line as usize)
+//         .map_or(false, |line| {
+//             let col = position.character as usize;
+//             col < line.len() && line.as_bytes()[col].is_ascii_whitespace()
+//         })
+// }
+
+/// Returns all tokens from `text` that precede `position`, in document order.
+///
+/// Tokens on earlier lines are always included. For tokens on the same line
+/// as `position`:
+/// - If the cursor is on whitespace, tokens whose end is at or before the
+///   cursor character are included, so that completed tokens immediately
+///   before the cursor are visible to the backwards scan.
+/// - If the cursor is within a token, only tokens that end strictly before
+///   the cursor character are included, excluding the partial token currently
+///   being typed.
+// fn tokens_before<'a>(text: &'a str, position: Position) -> Vec<Token<'a>> {
+//     let mut tokens = vec![];
+//     let lexer = Lexer::new(text);
+//     for token in lexer {
+//         if token.line < position.line {
+//             tokens.push(token);
+//         } else if token.line == position.line {
+//             if is_on_whitespace(text, position) {
+//                 if token.end <= position.character {
+//                     tokens.push(token);
+//                 }
+//             } else {
+//                 if token.end < position.character {
+//                     tokens.push(token);
+//                 }
+//             }
+//         } else {
+//             break;
+//         }
+//     }
+//     tokens
+// }
+
+/// Returns `true` if the cursor position is within an argument slot of a
+/// preceding instruction, indicating that keyword completions should be
+/// suppressed.
+///
+/// Scans backwards through the tokens that end at or before the cursor
+/// position, counting arguments until a recognized instruction is found.
+/// If the number of arguments seen is less than the instruction's total
+/// argument count (required + optional), the cursor is in an argument
+/// position.
+///
+/// A math expression delimited by `(` and `)` counts as a single argument.
+/// The scan stops and returns `false` at block boundaries (`{`, `}`),
+/// section headers, or the start of the document.
+///
+/// Returns `false` if the position is out of bounds.
+// pub fn is_in_argument_position(text: &str, position: Position) -> bool {
+//     let prev_tokens = tokens_before(text, position);
+//     crate::_log(&format!(
+//         "is_in_argument_position pos=({},{}) prev_tokens={:?}",
+//         position.line,
+//         position.character,
+//         prev_tokens.iter().map(|t| t.text).collect::<Vec<_>>()
+//     ));
+//     let mut i = prev_tokens.len();
+//     let mut args_seen = 0;
+//     while i > 0 && args_seen < MAX_ARGS {
+//         i -= 1;
+//         let text = prev_tokens[i].text;
+//         match text {
+//             ")" => {
+//                 // Consume the entire math expression.
+//                 while i > 0 {
+//                     i -= 1;
+//                     if prev_tokens[i].text == "(" {
+//                         break;
+//                     }
+//                 }
+//                 args_seen += 1;
+//             }
+//             t if t == "{" || t == "}" || instructions::is_section_header(t) => return false,
+//             t if args_seen < instructions::arguments(t).total() => return true,
+//             _ => args_seen += 1,
+//         }
+//     }
+//     false
+// }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -999,4 +1091,232 @@ mod tests {
             );
         }
     }
+
+    // mod is_in_argument_position {
+    //     use super::*;
+
+    //     /// An empty document is not an argument position.
+    //     #[test]
+    //     fn test_empty_document() {
+    //         assert!(!is_in_argument_position("", Position::new(0, 0)));
+    //     }
+
+    //     /// A zero-argument command is not followed by an argument position.
+    //     #[test]
+    //     fn test_zero_arg_command() {
+    //         // "random_placement " — cursor at the space (col 16)
+    //         assert!(!is_in_argument_position(
+    //             "random_placement ",
+    //             Position::new(0, 16)
+    //         ));
+    //     }
+
+    //     /// Cursor immediately after a command, before its argument.
+    //     #[test]
+    //     fn test_before_first_arg() {
+    //         // "create_object " — create_object ends at col 13, cursor at the space
+    //         assert!(is_in_argument_position(
+    //             "create_object ",
+    //             Position::new(0, 13)
+    //         ));
+    //     }
+
+    //     /// Cursor within the first argument.
+    //     #[test]
+    //     fn test_within_first_arg() {
+    //         // "create_object SCOUT" — cursor mid-SCOUT at col 16
+    //         assert!(is_in_argument_position(
+    //             "create_object SCOUT",
+    //             Position::new(0, 16)
+    //         ));
+    //     }
+
+    //     /// Cursor just after the first argument is no longer an argument position.
+    //     #[test]
+    //     fn test_after_first_arg() {
+    //         // "create_object SCOUT " — SCOUT ends at col 19, cursor at the space
+    //         assert!(!is_in_argument_position(
+    //             "create_object SCOUT ",
+    //             Position::new(0, 19)
+    //         ));
+    //     }
+
+    //     /// Cursor after a section header is not an argument position.
+    //     #[test]
+    //     fn test_after_section_header() {
+    //         assert!(!is_in_argument_position(
+    //             "<OBJECTS_GENERATION>\n",
+    //             Position::new(1, 0)
+    //         ));
+    //     }
+
+    //     /// Cursor immediately inside an open brace is not an argument position.
+    //     #[test]
+    //     fn test_after_open_brace() {
+    //         // Line 1 is "\t", the { on line 0 is a boundary.
+    //         assert!(!is_in_argument_position(
+    //             "create_object SCOUT {\n\t",
+    //             Position::new(1, 1)
+    //         ));
+    //     }
+
+    //     /// Cursor after a close brace is not an argument position.
+    //     #[test]
+    //     fn test_after_close_brace() {
+    //         assert!(!is_in_argument_position(
+    //             "create_object SCOUT {\n}\n",
+    //             Position::new(2, 0)
+    //         ));
+    //     }
+
+    //     /// Cursor after an attribute name inside a block, before its argument.
+    //     #[test]
+    //     fn test_attribute_before_arg() {
+    //         // Line 1: "\tnumber_of_objects " — token at col 1..18, cursor at space col 18
+    //         let text = "create_object SCOUT {\n\tnumber_of_objects ";
+    //         assert!(is_in_argument_position(text, Position::new(1, 18)));
+    //     }
+
+    //     /// Cursor on a new line after an attribute and its argument is not an argument position.
+    //     #[test]
+    //     fn test_attribute_after_arg() {
+    //         let text = "create_object SCOUT {\n\tnumber_of_objects 5\n\t";
+    //         assert!(!is_in_argument_position(text, Position::new(2, 1)));
+    //     }
+
+    //     /// A math expression counts as a single argument.
+    //     #[test]
+    //     fn test_math_expression_counts_as_one_arg() {
+    //         // "number_of_objects (A + B) " — cursor at the trailing space (col 25)
+    //         assert!(!is_in_argument_position(
+    //             "number_of_objects (A + B) ",
+    //             Position::new(0, 25)
+    //         ));
+    //     }
+
+    //     /// Cursor before a math expression argument.
+    //     #[test]
+    //     fn test_before_math_expression_arg() {
+    //         // "number_of_objects " — token ends at col 17, cursor at the space
+    //         assert!(is_in_argument_position(
+    //             "number_of_objects ",
+    //             Position::new(0, 17)
+    //         ));
+    //     }
+
+    //     /// The optional argument slot of circle_radius is an argument position.
+    //     #[test]
+    //     fn test_optional_arg_slot() {
+    //         // "circle_radius 20 " — "20" ends at col 16, cursor at the space
+    //         assert!(is_in_argument_position(
+    //             "circle_radius 20 ",
+    //             Position::new(0, 16)
+    //         ));
+    //     }
+
+    //     /// After all arguments including optional, is not an argument position.
+    //     #[test]
+    //     fn test_after_all_args() {
+    //         // "circle_radius 20 5 " — "5" ends at col 18, cursor at the space
+    //         assert!(!is_in_argument_position(
+    //             "circle_radius 20 5 ",
+    //             Position::new(0, 18)
+    //         ));
+    //     }
+
+    //     /// A two-argument command: cursor after the first argument is still an argument position.
+    //     #[test]
+    //     fn test_two_required_args_after_first() {
+    //         // "land_position 50 " — "50" ends at col 16, cursor at the space
+    //         assert!(is_in_argument_position(
+    //             "land_position 50 ",
+    //             Position::new(0, 16)
+    //         ));
+    //     }
+
+    //     /// A two-argument command: cursor after both arguments is not an argument position.
+    //     #[test]
+    //     fn test_two_required_args_after_both() {
+    //         // "land_position 50 50 " — second "50" ends at col 19, cursor at the space
+    //         assert!(!is_in_argument_position(
+    //             "land_position 50 50 ",
+    //             Position::new(0, 19)
+    //         ));
+    //     }
+    // }
+
+    // mod tokens_before {
+    //     use super::*;
+
+    //     /// No tokens before the start of the document.
+    //     #[test]
+    //     fn test_empty_document() {
+    //         assert!(tokens_before("", Position::new(0, 0)).is_empty());
+    //     }
+
+    //     /// The current token being typed is not included.
+    //     #[test]
+    //     fn test_current_token_excluded() {
+    //         // Cursor is mid-token "SCOUT" at col 14, within "create_object SCOUT"
+    //         let text = "create_object SCOUT";
+    //         let ts = tokens_before(text, Position::new(0, 16));
+    //         assert_eq!(
+    //             ts.iter().map(|t| t.text).collect::<Vec<_>>(),
+    //             vec!["create_object"]
+    //         );
+    //     }
+
+    //     /// A partial token being typed is not included.
+    //     #[test]
+    //     fn test_partial_token_excluded() {
+    //         // Cursor at col 14, inside "S" in "create_object S"
+    //         let text = "create_object S";
+    //         let ts = tokens_before(text, Position::new(0, 14));
+    //         assert_eq!(
+    //             ts.iter().map(|t| t.text).collect::<Vec<_>>(),
+    //             vec!["create_object"]
+    //         );
+    //     }
+
+    //     /// Cursor at end of line after a partial token is in argument position.
+    //     #[test]
+    //     fn test_partial_token_at_end_of_line() {
+    //         assert!(is_in_argument_position(
+    //             "create_object S",
+    //             Position::new(0, 15)
+    //         ));
+    //     }
+
+    //     /// A completed token whose end equals the cursor position is included
+    //     /// when the cursor is on whitespace.
+    //     #[test]
+    //     fn test_completed_token_at_cursor_included() {
+    //         // Cursor at col 19, the space after "SCOUT" in "create_object SCOUT "
+    //         let text = "create_object SCOUT ";
+    //         let ts = tokens_before(text, Position::new(0, 19));
+    //         assert_eq!(
+    //             ts.iter().map(|t| t.text).collect::<Vec<_>>(),
+    //             vec!["create_object", "SCOUT"]
+    //         );
+    //     }
+
+    //     /// Tokens on earlier lines are all included.
+    //     #[test]
+    //     fn test_tokens_on_earlier_lines_included() {
+    //         let text = "create_object SCOUT {\n\tnumber_of_objects ";
+    //         let ts = tokens_before(text, Position::new(1, 18));
+    //         assert_eq!(
+    //             ts.iter().map(|t| t.text).collect::<Vec<_>>(),
+    //             vec!["create_object", "SCOUT", "{", "number_of_objects"]
+    //         );
+    //     }
+
+    //     /// Tokens on later lines are not included.
+    //     #[test]
+    //     fn test_tokens_on_later_lines_excluded() {
+    //         let text = "create_object SCOUT {\n\tnumber_of_objects 5\n}";
+    //         let ts = tokens_before(text, Position::new(0, 0));
+    //         assert!(ts.is_empty());
+    //     }
+    // }
 }
