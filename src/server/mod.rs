@@ -3,5 +3,5 @@
 mod completion;
 mod hover;
 
-pub use hover::get_hover;
-pub use hover::lookup_hover;
+pub use completion::get_completions;
+pub use hover::{get_hover, lookup_hover};
