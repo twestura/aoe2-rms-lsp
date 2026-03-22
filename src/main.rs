@@ -1,10 +1,11 @@
 //! Aoe2 RMS Language Server
 
-mod arguments;
-mod document;
-mod instructions;
-mod rms;
-mod tokenizer;
+mod instructions; // TODO remove/refactor to parser
+mod parser;
+mod rms; // TODO remove/refactor to server
+mod server;
+
+use server::{get_hover, lookup_hover};
 
 use std::collections::HashMap;
 
@@ -25,12 +26,6 @@ use tower_lsp::{
 };
 
 use crate::rms::CompletionText;
-
-/// Predefined constants and labels generated from CSV files.
-mod predefined {
-    include!(concat!(env!("OUT_DIR"), "/constants.rs"));
-    include!(concat!(env!("OUT_DIR"), "/labels.rs"));
-}
 
 /// All tokens that are recognized by the language server and can be offered as
 /// completion suggestions, along with their lowercase forms for case-insensitive
@@ -222,7 +217,6 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "server initialized!")
             .await;
-        // _log("server initialized!");
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -255,15 +249,7 @@ impl LanguageServer for Backend {
         let documents = self.documents.read().await;
         let hover_result = documents
             .get(&uri)
-            .and_then(|text| get_hover_text(text, position))
-            .map(str::to_string)
-            .map(|value| Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value,
-                }),
-                range: None,
-            });
+            .and_then(|text| get_hover(text, position));
         Ok(hover_result)
     }
 
@@ -312,312 +298,6 @@ fn _log(msg: &str) {
         .open("aoe2-rms-lsp.txt")
         .unwrap();
     writeln!(file, "{msg}").unwrap();
-}
-
-/// Returns the hover text for the token at the given position, or `None` if there is no text.
-fn get_hover_text(text: &str, position: Position) -> Option<&'static str> {
-    let context = rms::document_context_at(text, position);
-    if context.in_comment {
-        return None;
-    }
-    let token = rms::extract_token(text, position)?;
-    lookup_hover(token)
-}
-
-/// Returns the hover content for the given token, or `None` if the token does
-/// not have hover data.
-fn lookup_hover(token: &str) -> Option<&'static str> {
-    match token {
-        // Sections
-        "<PLAYER_SETUP>" => Some(include_str!("../hover_docs/sections/player-setup.md")),
-        "<LAND_GENERATION>" => Some(include_str!("../hover_docs/sections/land-generation.md")),
-        "<ELEVATION_GENERATION>" => Some(include_str!(
-            "../hover_docs/sections/elevation-generation.md"
-        )),
-        "<CLIFF_GENERATION>" => Some(include_str!("../hover_docs/sections/cliff-generation.md")),
-        "<TERRAIN_GENERATION>" => {
-            Some(include_str!("../hover_docs/sections/terrain-generation.md"))
-        }
-        "<CONNECTION_GENERATION>" => Some(include_str!(
-            "../hover_docs/sections/connection-generation.md"
-        )),
-        "<OBJECTS_GENERATION>" => {
-            Some(include_str!("../hover_docs/sections/objects-generation.md"))
-        }
-        // Commands
-        "random_placement" => Some(include_str!("../hover_docs/commands/random-placement.md")),
-        "direct_placement" => Some(include_str!("../hover_docs/commands/direct-placement.md")),
-        "grouped_by_team" => Some(include_str!("../hover_docs/commands/grouped-by-team.md")),
-        "nomad_resources" => Some(include_str!("../hover_docs/commands/nomad-resources.md")),
-        "force_nomad_treaty" => Some(include_str!("../hover_docs/commands/force-nomad-treaty.md")),
-        "behavior_version" => Some(include_str!("../hover_docs/commands/behavior-version.md")),
-        "override_map_size" => Some(include_str!("../hover_docs/commands/override-map-size.md")),
-        "set_gaia_civilization" => Some(include_str!(
-            "../hover_docs/commands/set-gaia-civilization.md"
-        )),
-        "ai_info_map_type" => Some(include_str!("../hover_docs/commands/ai-info-map-type.md")),
-        "effect_amount" => Some(include_str!("../hover_docs/commands/effect-amount.md")),
-        "effect_percent" => Some(include_str!("../hover_docs/commands/effect-percent.md")),
-        "guard_state" => Some(include_str!("../hover_docs/commands/guard-state.md")),
-        "terrain_state" => Some(include_str!("../hover_docs/commands/terrain-state.md")),
-        "weather_type" => Some(include_str!("../hover_docs/commands/weather-type.md")),
-        "water_definition" => Some(include_str!("../hover_docs/commands/water-definition.md")),
-        "enable_waves" => Some(include_str!("../hover_docs/commands/enable-waves.md")),
-        "create_player_lands" => Some(include_str!(
-            "../hover_docs/commands/create-player-lands.md"
-        )),
-        "create_land" => Some(include_str!("../hover_docs/commands/create-land.md")),
-        "create_elevation" => Some(include_str!("../hover_docs/commands/create-elevation.md")),
-        "color_correction" => Some(include_str!("../hover_docs/commands/color-correction.md")),
-        "create_terrain" => Some(include_str!("../hover_docs/commands/create-terrain.md")),
-        "cliff_type" => Some(include_str!("../hover_docs/commands/cliff-type.md")),
-        "min_number_of_cliffs" => Some(include_str!(
-            "../hover_docs/commands/min-number-of-cliffs.md"
-        )),
-        "max_number_of_cliffs" => Some(include_str!(
-            "../hover_docs/commands/max-number-of-cliffs.md"
-        )),
-        "min_length_of_cliff" => Some(include_str!(
-            "../hover_docs/commands/min-length-of-cliff.md"
-        )),
-        "max_length_of_cliff" => Some(include_str!(
-            "../hover_docs/commands/max-length-of-cliff.md"
-        )),
-        "cliff_curliness" => Some(include_str!("../hover_docs/commands/cliff-curliness.md")),
-        "min_distance_cliffs" => Some(include_str!(
-            "../hover_docs/commands/min-distance-cliffs.md"
-        )),
-        "min_terrain_distance" => Some(include_str!(
-            "../hover_docs/commands/min-terrain-distance.md"
-        )),
-        "accumulate_connections" => Some(include_str!(
-            "../hover_docs/commands/accumulate-connections.md"
-        )),
-        "create_connect_all_players_land" => Some(include_str!(
-            "../hover_docs/commands/create-connect-all-players-land.md"
-        )),
-        "create_connect_teams_lands" => Some(include_str!(
-            "../hover_docs/commands/create-connect-teams-lands.md"
-        )),
-        "create_connect_all_lands" => Some(include_str!(
-            "../hover_docs/commands/create-connect-all-lands.md"
-        )),
-        "create_connect_same_land_zones" => Some(include_str!(
-            "../hover_docs/commands/create-connect-same-land-zones.md"
-        )),
-        "create_connect_land_zones" => Some(include_str!(
-            "../hover_docs/commands/create-connect-land-zones.md"
-        )),
-        "create_connect_to_nonplayer_land" => Some(include_str!(
-            "../hover_docs/commands/create-connect-to-nonplayer-land.md"
-        )),
-        "create_actor_area" => Some(include_str!("../hover_docs/commands/create-actor-area.md")),
-        "create_object_group" => Some(include_str!(
-            "../hover_docs/commands/create-object-group.md"
-        )),
-        "create_object" => Some(include_str!("../hover_docs/commands/create-object.md")),
-        // Attributes
-        "terrain_type" => Some(include_str!("../hover_docs/attributes/terrain-type.md")),
-        "land_percent" => Some(include_str!("../hover_docs/attributes/land-percent.md")),
-        "number_of_tiles" => Some(include_str!("../hover_docs/attributes/number-of-tiles.md")),
-        "base_size" => Some(include_str!("../hover_docs/attributes/base-size.md")),
-        "set_circular_base" => Some(include_str!(
-            "../hover_docs/attributes/set-circular-base.md"
-        )),
-        "generate_mode" => Some(include_str!("../hover_docs/attributes/generate-mode.md")),
-        "land_position" => Some(include_str!("../hover_docs/attributes/land-position.md")),
-        "circle_radius" => Some(include_str!("../hover_docs/attributes/circle-radius.md")),
-        "left_border" => Some(include_str!("../hover_docs/attributes/borders.md")),
-        "right_border" => Some(include_str!("../hover_docs/attributes/borders.md")),
-        "top_border" => Some(include_str!("../hover_docs/attributes/borders.md")),
-        "bottom_border" => Some(include_str!("../hover_docs/attributes/borders.md")),
-        "border_fuzziness" => Some(include_str!("../hover_docs/attributes/border-fuzziness.md")),
-        "clumping_factor" => Some(include_str!("../hover_docs/attributes/clumping-factor.md")),
-        "land_conformity" => Some(include_str!("../hover_docs/attributes/land-conformity.md")),
-        "base_elevation" => Some(include_str!("../hover_docs/attributes/base-elevation.md")),
-        "assign_to_player" => Some(include_str!("../hover_docs/attributes/assign-to-player.md")),
-        "assign_to" => Some(include_str!("../hover_docs/attributes/assign-to.md")),
-        "zone" => Some(include_str!("../hover_docs/attributes/zone.md")),
-        "set_zone_by_team" => Some(include_str!("../hover_docs/attributes/set-zone-by-team.md")),
-        "set_zone_randomly" => Some(include_str!(
-            "../hover_docs/attributes/set-zone-randomly.md"
-        )),
-        "other_zone_avoidance_distance" => Some(include_str!(
-            "../hover_docs/attributes/other-zone-avoidance-distance.md"
-        )),
-        "min_placement_distance" => Some(include_str!(
-            "../hover_docs/attributes/min-placement-distance.md"
-        )),
-        "land_id" => Some(include_str!("../hover_docs/attributes/land-id.md")),
-        "number_of_clumps" => Some(include_str!("../hover_docs/attributes/number-of-clumps.md")),
-        "set_scale_by_size" => Some(include_str!(
-            "../hover_docs/attributes/set-scale-by-size.md"
-        )),
-        "set_scale_by_groups" => Some(include_str!(
-            "../hover_docs/attributes/set-scale-by-groups.md"
-        )),
-        "spacing" => Some(include_str!("../hover_docs/attributes/spacing.md")),
-        "enable_balanced_elevation" => Some(include_str!(
-            "../hover_docs/attributes/enable-balanced-elevation.md"
-        )),
-        "beach_terrain" => Some(include_str!("../hover_docs/attributes/beach-terrain.md")),
-        "terrain_mask" => Some(include_str!("../hover_docs/attributes/terrain-mask.md")),
-        "spacing_to_other_terrain_types" => Some(include_str!(
-            "../hover_docs/attributes/spacing-to-other-terrain-types.md"
-        )),
-        "spacing_to_specific_terrain" => Some(include_str!(
-            "../hover_docs/attributes/spacing-to-specific-terrain.md"
-        )),
-        "set_flat_terrain_only" => Some(include_str!(
-            "../hover_docs/attributes/set-flat-terrain-only.md"
-        )),
-        "set_avoid_player_start_areas" => Some(include_str!(
-            "../hover_docs/attributes/set-avoid-player-start-areas.md"
-        )),
-        "height_limits" => Some(include_str!("../hover_docs/attributes/height-limits.md")),
-        "default_terrain_replacement" => Some(include_str!(
-            "../hover_docs/attributes/default-terrain-replacement.md"
-        )),
-        "replace_terrain" => Some(include_str!("../hover_docs/attributes/replace-terrain.md")),
-        "terrain_cost" => Some(include_str!("../hover_docs/attributes/terrain-cost.md")),
-        "terrain_size" => Some(include_str!("../hover_docs/attributes/terrain-size.md")),
-        "add_object" => Some(include_str!("../hover_docs/attributes/add-object.md")),
-        "number_of_objects" => Some(include_str!(
-            "../hover_docs/attributes/number-of-objects.md"
-        )),
-        "number_of_groups" => Some(include_str!("../hover_docs/attributes/number-of-groups.md")),
-        "group_variance" => Some(include_str!("../hover_docs/attributes/group-variance.md")),
-        "group_placement_radius" => Some(include_str!(
-            "../hover_docs/attributes/group-placement-radius.md"
-        )),
-        "set_tight_grouping" => Some(include_str!(
-            "../hover_docs/attributes/set-tight-grouping.md"
-        )),
-        "set_loose_grouping" => Some(include_str!(
-            "../hover_docs/attributes/set-loose-grouping.md"
-        )),
-        "min_connected_tiles" => Some(include_str!(
-            "../hover_docs/attributes/min-connected-tiles.md"
-        )),
-        "resource_delta" => Some(include_str!("../hover_docs/attributes/resource-delta.md")),
-        "second_object" => Some(include_str!("../hover_docs/attributes/second-object.md")),
-        "set_scaling_to_map_size" => Some(include_str!(
-            "../hover_docs/attributes/set-scaling-to-map-size.md"
-        )),
-        "set_scaling_to_player_number" => Some(include_str!(
-            "../hover_docs/attributes/set-scaling-to-player-number.md"
-        )),
-        "set_place_for_every_player" => Some(include_str!(
-            "../hover_docs/attributes/set-place-for-every-player.md"
-        )),
-        "place_on_specific_land_id" => Some(include_str!(
-            "../hover_docs/attributes/place-on-specific-land-id.md"
-        )),
-        "avoid_other_land_zones" => Some(include_str!(
-            "../hover_docs/attributes/avoid-other-land-zones.md"
-        )),
-        "generate_for_first_land_only" => Some(include_str!(
-            "../hover_docs/attributes/generate-for-first-land-only.md"
-        )),
-        "set_gaia_object_only" => Some(include_str!(
-            "../hover_docs/attributes/set-gaia-object-only.md"
-        )),
-        "set_gaia_unconvertible" => Some(include_str!(
-            "../hover_docs/attributes/set-gaia-unconvertible.md"
-        )),
-        "set_building_capturable" => Some(include_str!(
-            "../hover_docs/attributes/set-building-capturable.md"
-        )),
-        "make_indestructible" => Some(include_str!(
-            "../hover_docs/attributes/make-indestructible.md"
-        )),
-        "min_distance_to_players" => Some(include_str!(
-            "../hover_docs/attributes/distance-to-players.md"
-        )),
-        "max_distance_to_players" => Some(include_str!(
-            "../hover_docs/attributes/distance-to-players.md"
-        )),
-        "set_circular_placement" => Some(include_str!(
-            "../hover_docs/attributes/set-circular-placement.md"
-        )),
-        "terrain_to_place_on" => Some(include_str!(
-            "../hover_docs/attributes/terrain-to-place-on.md"
-        )),
-        "layer_to_place_on" => Some(include_str!(
-            "../hover_docs/attributes/layer-to-place-on.md"
-        )),
-        "ignore_terrain_restrictions" => Some(include_str!(
-            "../hover_docs/attributes/ignore-terrain-restrictions.md"
-        )),
-        "max_distance_to_other_zones" => Some(include_str!(
-            "../hover_docs/attributes/max-distance-to-other-zones.md"
-        )),
-        "place_on_forest_zone" => Some(include_str!(
-            "../hover_docs/attributes/place-on-forest-zone.md"
-        )),
-        "avoid_forest_zone" => Some(include_str!(
-            "../hover_docs/attributes/avoid-forest-zone.md"
-        )),
-        "avoid_cliff_zone" => Some(include_str!("../hover_docs/attributes/avoid-cliff-zone.md")),
-        "min_distance_to_map_edge" => Some(include_str!(
-            "../hover_docs/attributes/min-distance-to-map-edge.md"
-        )),
-        "min_distance_group_placement" => Some(include_str!(
-            "../hover_docs/attributes/min-distance-group-placement.md"
-        )),
-        "temp_min_distance_group_placement" => Some(include_str!(
-            "../hover_docs/attributes/temp-min-distance-group-placement.md"
-        )),
-        "find_closest" => Some(include_str!("../hover_docs/attributes/find-closest.md")),
-        "find_closest_to_map_center" => Some(include_str!(
-            "../hover_docs/attributes/find-closest-to-map-center.md"
-        )),
-        "find_closest_to_map_edge" => Some(include_str!(
-            "../hover_docs/attributes/find-closest-to-map-edge.md"
-        )),
-        "enable_tile_shuffling" => Some(include_str!(
-            "../hover_docs/attributes/enable-tile-shuffling.md"
-        )),
-        "require_path" => Some(include_str!("../hover_docs/attributes/require-path.md")),
-        "force_placement" => Some(include_str!("../hover_docs/attributes/force-placement.md")),
-        "actor_area" => Some(include_str!("../hover_docs/attributes/actor-area.md")),
-        "actor_area_radius" => Some(include_str!(
-            "../hover_docs/attributes/actor-area-radius.md"
-        )),
-        "override_actor_radius_if_required" => Some(include_str!(
-            "../hover_docs/attributes/override-actor-radius-if-required.md"
-        )),
-        "actor_area_to_place_in" => Some(include_str!(
-            "../hover_docs/attributes/actor-area-to-place-in.md"
-        )),
-        "avoid_actor_area" => Some(include_str!("../hover_docs/attributes/avoid-actor-area.md")),
-        "avoid_all_actor_areas" => Some(include_str!(
-            "../hover_docs/attributes/avoid-all-actor-areas.md"
-        )),
-        "set_facet" => Some(include_str!("../hover_docs/attributes/set-facet.md")),
-        "match_player_civ" => Some(include_str!("../hover_docs/attributes/match-player-civ.md")),
-        // Ambiguous: Command-Attributes
-        "base_terrain" => Some(include_str!(
-            "../hover_docs/command-attributes/base-terrain.md"
-        )),
-        "base_layer" => Some(include_str!(
-            "../hover_docs/command-attributes/base-layer.md"
-        )),
-        // Keywords
-        "else" => Some(include_str!("../hover_docs/keywords/else.md")),
-        "if" => Some(include_str!("../hover_docs/keywords/if.md")),
-        "elseif" => Some(include_str!("../hover_docs/keywords/elseif.md")),
-        "endif" => Some(include_str!("../hover_docs/keywords/endif.md")),
-        "start_random" => Some(include_str!("../hover_docs/keywords/start-random.md")),
-        "end_random" => Some(include_str!("../hover_docs/keywords/end-random.md")),
-        "percent_chance" => Some(include_str!("../hover_docs/keywords/percent-chance.md")),
-        "rnd" => Some(include_str!("../hover_docs/keywords/rnd.md")),
-        "#define" => Some(include_str!("../hover_docs/keywords/define.md")),
-        "#const" => Some(include_str!("../hover_docs/keywords/const.md")),
-        "#include-drs" => Some(include_str!("../hover_docs/keywords/include-drs.md")),
-        "#includexs" => Some(include_str!("../hover_docs/keywords/includexs.md")),
-        _ => None,
-    }
 }
 
 /// A token that can be offered as a completion suggestion.
@@ -696,13 +376,6 @@ fn filter_tokens(completion_text: &CompletionText) -> Vec<&'static CompletableTo
 fn get_completions(text: &str, position: Position) -> Option<Vec<CompletionItem>> {
     // No autocomplete in comments.
     let context = rms::document_context_at(text, position);
-    // _log(&format!(
-    //     "get_completions pos=({},{}) in_comment={} in_arg_pos={}",
-    //     position.line,
-    //     position.character,
-    //     context.in_comment,
-    //     rms::is_in_argument_position(text, position)
-    // ));
     if context.in_comment {
         return None;
     }

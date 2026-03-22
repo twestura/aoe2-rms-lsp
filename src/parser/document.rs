@@ -6,4 +6,4 @@
 //! - Constant and Label Renaming
 
 /// Represents a parsed document split into tokens.
-pub struct Document {}
+pub struct RmsDocument {}
