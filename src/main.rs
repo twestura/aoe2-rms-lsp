@@ -26,6 +26,12 @@ use tower_lsp::{
 
 use crate::rms::CompletionText;
 
+/// Predefined constants and labels generated from CSV files.
+mod predefined {
+    include!(concat!(env!("OUT_DIR"), "/constants.rs"));
+    include!(concat!(env!("OUT_DIR"), "/labels.rs"));
+}
+
 /// All tokens that are recognized by the language server and can be offered as
 /// completion suggestions, along with their lowercase forms for case-insensitive
 /// matching, their kinds for coloring and icons in the completion popup, and
@@ -280,6 +286,14 @@ async fn main() {
     // std::panic::set_hook(Box::new(|info| {
     //     _log(&format!("PANIC: {info}"));
     // }));
+    // _log(&format!(
+    //     "TERRAIN_CONSTANTS count: {}",
+    //     predefined::TERRAIN_CONSTANTS.len()
+    // ));
+    // _log(&format!(
+    //     "GAME_MODE_LABELS count: {}",
+    //     predefined::GAME_MODE_LABELS.len()
+    // ));
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     let (service, socket) = LspService::new(|client| Backend {
