@@ -1,6 +1,7 @@
 //! Aoe2 RMS Language Server
 
 mod arguments;
+mod document;
 mod instructions;
 mod rms;
 mod tokenizer;
