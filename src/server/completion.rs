@@ -1,8 +1,8 @@
 //! Handles completion requests for the language server.
 
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionTextEdit, Documentation, InsertTextFormat,
-    MarkupContent, MarkupKind, Position, Range, TextEdit,
+    CompletionItem, CompletionItemKind, CompletionResponse, CompletionTextEdit, Documentation,
+    InsertTextFormat, MarkupContent, MarkupKind, Position, Range, TextEdit,
 };
 
 use crate::{
@@ -234,7 +234,7 @@ fn filter_tokens(completion_text: &CompletionText) -> Vec<&'static CompletableTo
     }
 }
 
-/// Returns a list of completions for the given text and position.
+/// Returns a completion response for the given text and position.
 ///
 /// The `COMPLETABLE_TOKENS` list defines the tokens that can be completed.
 /// A valid completion occurs when the prefix at the current position is
@@ -243,7 +243,7 @@ fn filter_tokens(completion_text: &CompletionText) -> Vec<&'static CompletableTo
 ///
 /// Returns `None` if the position is in a comment.
 /// Returns the entire list if there is no prefix to complete.
-pub fn get_completions(text: &str, position: Position) -> Option<Vec<CompletionItem>> {
+pub fn get_completions(text: &str, position: Position) -> Option<CompletionResponse> {
     // No autocomplete in comments.
     let context = rms::document_context_at(text, position);
     if context.in_comment {
@@ -257,5 +257,5 @@ pub fn get_completions(text: &str, position: Position) -> Option<Vec<CompletionI
         .iter()
         .map(|token| token.to_completion_item(completion_text.range))
         .collect();
-    Some(completion_items)
+    Some(CompletionResponse::Array(completion_items))
 }

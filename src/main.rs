@@ -5,6 +5,8 @@ mod parser;
 mod rms; // TODO remove/refactor to server
 mod server;
 
+use parser::RmsDocument;
+
 use server::{get_completions, get_hover};
 
 use std::collections::HashMap;
@@ -26,10 +28,15 @@ use tower_lsp::{
 /// The server's in-memory state.
 #[derive(Debug)]
 struct Backend {
+    /// Handle for communicating with the client.
     client: Client,
     /// The server's in-memory document store.
     /// Maps a document's URI to its contents.
-    documents: RwLock<HashMap<Url, String>>,
+    documents: RwLock<HashMap<Url, RmsDocument>>,
+    /// The server's in-memory document store.
+    /// Maps a document's URI to its contents.
+    /// Temporary until the fully parsed document store is implemented.
+    texts: RwLock<HashMap<Url, String>>,
 }
 
 #[tower_lsp::async_trait]
@@ -62,7 +69,10 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
-        self.documents.write().await.insert(uri, text);
+        // TODO replace the basic text document with the parsed doc.
+        self.texts.write().await.insert(uri.clone(), text.clone());
+        let rms_doc = parser::parse(text);
+        self.documents.write().await.insert(uri, rms_doc);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -71,35 +81,32 @@ impl LanguageServer for Backend {
         // the entire document in the change. This is fine for small map
         // scripts (many maps are just a few hundred lines) during development.
         let text = params.content_changes.into_iter().next().unwrap().text;
-        self.documents.write().await.insert(uri, text);
+        self.texts.write().await.insert(uri.clone(), text.clone());
+        let rms_doc = RmsDocument::new(text);
+        self.documents.write().await.insert(uri, rms_doc);
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
-        self.documents.write().await.remove(&uri);
+        self.texts.write().await.remove(&uri);
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let documents = self.documents.read().await;
-        let hover_result = documents
+        let documents = self.texts.read().await;
+        Ok(documents
             .get(&uri)
-            .and_then(|text| get_hover(text, position));
-        Ok(hover_result)
+            .and_then(|text| get_hover(text, position)))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let documents = self.documents.read().await;
-        let Some(text) = documents.get(&uri) else {
-            return Ok(None);
-        };
-        let Some(items) = get_completions(text, position) else {
-            return Ok(None);
-        };
-        Ok(Some(CompletionResponse::Array(items)))
+        let documents = self.texts.read().await;
+        Ok(documents
+            .get(&uri)
+            .and_then(|text| get_completions(text, position)))
     }
 }
 
@@ -121,6 +128,7 @@ async fn main() {
     let (service, socket) = LspService::new(|client| Backend {
         client,
         documents: RwLock::new(HashMap::new()),
+        texts: RwLock::new(HashMap::new()), // TODO eventually remove
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
