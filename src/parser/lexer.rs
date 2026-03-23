@@ -1,10 +1,33 @@
 //! Turns a raw string into a sequence of [`Lexeme`]s.
 
-use crate::parser::lexeme::Lexeme;
-
 /// Lexes a raw string into a sequence of [`Lexeme`]s.
-pub fn lex<'a>(text: &'a str) -> Vec<Lexeme<'a>> {
+pub fn lex(text: &str) -> Vec<Lexeme> {
     Lexer::new(text).lex()
+}
+
+/// Index information for raw text parsed from a RMS file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Lexeme {
+    /// The start byte index of the lexeme in the RMS file (inclusive).
+    pub text_start: usize,
+    /// The end byte index of the lexeme in the RMS file (exclusive).
+    pub text_end: usize,
+    /// The line number of the lexeme in the RMS file.
+    pub lineno: usize,
+    /// The start byte index of the lexeme in the current line (inclusive).
+    pub line_start: usize,
+    /// The end byte index of the lexeme in the current line (exclusive).
+    pub line_end: usize,
+}
+
+impl Lexeme {
+    /// Returns the text of the lexeme within the given source string.
+    /// Requires that the `text_start` and `text_end` indices are valid for the source string.
+    pub fn text<'a>(&self, source: &'a str) -> &'a str {
+        debug_assert!(self.text_start <= self.text_end);
+        debug_assert!(self.text_end <= source.len());
+        &source[self.text_start..self.text_end]
+    }
 }
 
 /// Internal lexer state for [`lex`].
@@ -30,14 +53,14 @@ struct LexState {
     lineno: usize,
 
     /// The overall byte index of the start of the current line.
-    line_start: usize,
+    line_offset: usize,
 }
 
 impl LexState {
     /// Returns the index of the current column in the current line.
     /// 0-indexed.
     fn column(&self) -> usize {
-        self.offset - self.line_start
+        self.offset - self.line_offset
     }
 }
 
@@ -51,7 +74,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Lexes the raw text into a sequence of [`Lexeme`]s.
-    fn lex(&self) -> Vec<Lexeme<'a>> {
+    fn lex(&self) -> Vec<Lexeme> {
         let mut state = LexState::default();
         let mut lexemes = Vec::new();
         while state.offset < self.text.len() {
@@ -87,7 +110,7 @@ impl<'a> Lexer<'a> {
             state.offset += 1;
             if c == b'\n' {
                 state.lineno += 1;
-                state.line_start = state.offset;
+                state.line_offset = state.offset; // The line starts at the char after the \n.
             }
         }
         state
@@ -98,7 +121,7 @@ impl<'a> Lexer<'a> {
     /// Requires:
     /// - The starting offset is a valid byte index.
     /// - The starting character is not whitespace.
-    fn lex_nonwhitespace(&self, init_state: LexState) -> (Lexeme<'a>, LexState) {
+    fn lex_nonwhitespace(&self, init_state: LexState) -> (Lexeme, LexState) {
         debug_assert!(init_state.offset < self.text.len());
         debug_assert!(!self.byte_at(init_state.offset).is_ascii_whitespace());
         let mut state = init_state;
@@ -109,8 +132,13 @@ impl<'a> Lexer<'a> {
             }
             state.offset += 1;
         }
-        let text = &self.text[init_state.offset..state.offset];
-        let lexeme = Lexeme::new(text, init_state.lineno, init_state.column(), state.column());
+        let lexeme = Lexeme {
+            text_start: init_state.offset,
+            text_end: state.offset,
+            lineno: init_state.lineno,
+            line_start: init_state.column(),
+            line_end: state.column(),
+        };
         (lexeme, state)
     }
 }
@@ -137,27 +165,31 @@ mod tests {
         /// A single nonwhitespace sequence produces a single lexeme.
         #[test]
         fn test_single_token() {
-            let lexemes = lex("create_land");
+            let text = "create_land";
+            let lexemes = lex(text);
             assert_eq!(lexemes.len(), 1);
-            assert_eq!(lexemes[0].to_string(), "create_land");
+            assert_eq!(lexemes[0].text(text), "create_land");
         }
 
         /// Multiple nonwhitespace sequences on a single line produce multiple
         /// lexemes.
         #[test]
         fn test_multiple_tokens() {
-            let lexemes = lex("terrain_type GRASS");
+            let text = "terrain_type GRASS";
+            let lexemes = lex(text);
             assert_eq!(lexemes.len(), 2);
-            assert_eq!(lexemes[0].to_string(), "terrain_type");
-            assert_eq!(lexemes[1].to_string(), "GRASS");
+            assert_eq!(lexemes[0].text(text), "terrain_type");
+            assert_eq!(lexemes[1].text(text), "GRASS");
         }
 
         /// Nonwhitespace sequences on separate lines are all produced.
         #[test]
         fn test_tokens_on_separate_lines() {
-            let lexemes = lex("create_land {\nterrain_type GRASS\n}");
+            let text = "create_land {\nterrain_type GRASS\n}";
+            let lexemes = lex(text);
+            let texts: Vec<&str> = lexemes.iter().map(|lexeme| lexeme.text(text)).collect();
             assert_eq!(
-                lexemes.iter().map(|c| c.to_string()).collect::<Vec<_>>(),
+                texts,
                 vec!["create_land", "{", "terrain_type", "GRASS", "}"]
             );
         }
@@ -165,83 +197,221 @@ mod tests {
         /// A parenthesis is treated as a regular nonwhitespace character.
         #[test]
         fn test_parenthesis_is_lexeme() {
-            let lexemes = lex("(A + B)");
-            assert_eq!(
-                lexemes.iter().map(|l| l.to_string()).collect::<Vec<_>>(),
-                vec!["(A", "+", "B)"]
-            );
+            let text = "(A + B)";
+            let lexemes = lex(text);
+            let texts: Vec<&str> = lexemes.iter().map(|lexeme| lexeme.text(text)).collect();
+            assert_eq!(texts, vec!["(A", "+", "B)"]);
         }
 
         /// `rnd(min,max)` is a single lexeme.
         #[test]
         fn test_rnd_is_single_lexeme() {
-            let lexemes = lex("rnd(1,6)");
+            let text = "rnd(1,6)";
+            let lexemes = lex(text);
             assert_eq!(lexemes.len(), 1);
-            assert_eq!(lexemes[0].to_string(), "rnd(1,6)");
+            assert_eq!(lexemes[0].text(text), "rnd(1,6)");
         }
 
         /// Comment delimiters are treated as regular lexemes.
         #[test]
         fn test_comment_delimiters_are_lexemes() {
-            let lexemes = lex("/* comment */");
-            assert_eq!(
-                lexemes.iter().map(|l| l.to_string()).collect::<Vec<_>>(),
-                vec!["/*", "comment", "*/"]
-            );
+            let text = "/* comment */";
+            let lexemes = lex(text);
+            let texts: Vec<&str> = lexemes.iter().map(|lexeme| lexeme.text(text)).collect();
+            assert_eq!(texts, vec!["/*", "comment", "*/"]);
         }
 
-        /// Lexeme positions are correct for a token on the first line.
+        /// Lexeme absolute positions are correct for a token on the first line.
         #[test]
-        fn test_position_first_line() {
+        fn test_abs_position_first_line() {
             let lexemes = lex("create_land");
-            assert_eq!(lexemes[0].lineno(), 0);
-            assert_eq!(lexemes[0].start(), 0);
-            assert_eq!(lexemes[0].end(), 11);
+            assert_eq!(lexemes[0].text_start, 0);
+            assert_eq!(lexemes[0].text_end, 11);
         }
 
-        /// Lexeme positions are correct for a token on the second line.
+        /// Lexeme absolute positions are correct for a token on the second line.
         #[test]
-        fn test_position_second_line() {
+        fn test_abs_position_second_line() {
             let lexemes = lex("abc\nterrain_type");
-            assert_eq!(lexemes[1].lineno(), 1);
-            assert_eq!(lexemes[1].start(), 0);
-            assert_eq!(lexemes[1].end(), 12);
+            assert_eq!(lexemes[1].text_start, 4);
+            assert_eq!(lexemes[1].text_end, 16);
+        }
+
+        /// Lexeme line and column positions are correct for a token on the first line.
+        #[test]
+        fn test_line_position_first_line() {
+            let lexemes = lex("create_land");
+            assert_eq!(lexemes[0].lineno, 0);
+            assert_eq!(lexemes[0].line_start, 0);
+            assert_eq!(lexemes[0].line_end, 11);
+        }
+
+        /// Lexeme line and column positions are correct for a token on the second line.
+        #[test]
+        fn test_line_position_second_line() {
+            let lexemes = lex("abc\nterrain_type");
+            assert_eq!(lexemes[1].lineno, 1);
+            assert_eq!(lexemes[1].line_start, 0);
+            assert_eq!(lexemes[1].line_end, 12);
         }
 
         /// Lexeme positions are correct for an indented token.
         #[test]
         fn test_position_indented() {
             let lexemes = lex("\tterrain_type");
-            assert_eq!(lexemes[0].lineno(), 0);
-            assert_eq!(lexemes[0].start(), 1);
-            assert_eq!(lexemes[0].end(), 13);
+            assert_eq!(lexemes[0].lineno, 0);
+            assert_eq!(lexemes[0].line_start, 1);
+            assert_eq!(lexemes[0].line_end, 13);
         }
 
         /// Lexeme positions are correct for the second token on a line.
         #[test]
         fn test_position_second_token_on_line() {
             let lexemes = lex("terrain_type GRASS");
-            assert_eq!(lexemes[1].lineno(), 0);
-            assert_eq!(lexemes[1].start(), 13);
-            assert_eq!(lexemes[1].end(), 18);
+            assert_eq!(lexemes[1].lineno, 0);
+            assert_eq!(lexemes[1].line_start, 13);
+            assert_eq!(lexemes[1].line_end, 18);
         }
 
         /// A section header is a single lexeme.
         #[test]
         fn test_section_header() {
-            let lexemes = lex("<PLAYER_SETUP>");
+            let text = "<PLAYER_SETUP>";
+            let lexemes = lex(text);
             assert_eq!(lexemes.len(), 1);
-            assert_eq!(lexemes[0].to_string(), "<PLAYER_SETUP>");
+            assert_eq!(lexemes[0].text(text), "<PLAYER_SETUP>");
         }
 
         /// Tabs are treated as whitespace separators.
         #[test]
         fn test_tab_separator() {
-            let lexemes = lex("a\tb");
-            assert_eq!(
-                lexemes.iter().map(|l| l.to_string()).collect::<Vec<_>>(),
-                vec!["a", "b"]
-            );
+            let text = "a\tb";
+            let lexemes = lex(text);
+            let texts: Vec<&str> = lexemes.iter().map(|lexeme| lexeme.text(text)).collect();
+            assert_eq!(texts, vec!["a", "b"]);
+        }
+
+        /// A multi-byte Unicode character is treated as a single nonwhitespace
+        /// sequence and byte indices are correct.
+        #[test]
+        fn test_unicode_character() {
+            let text = "é abc";
+            let lexemes = lex(text);
+            assert_eq!(lexemes[0].text(text), "é");
+            assert_eq!(lexemes[0].text_start, 0);
+            assert_eq!(lexemes[0].text_end, 2);
+            assert_eq!(lexemes[1].text(text), "abc");
+            assert_eq!(lexemes[1].text_start, 3);
+        }
+
+        /// Multiple consecutive newlines increment the line number correctly.
+        #[test]
+        fn test_multiple_consecutive_newlines() {
+            let text = "abc\n\n\ndef";
+            let lexemes = lex(text);
+            assert_eq!(lexemes[1].lineno, 3);
+            assert_eq!(lexemes[1].line_start, 0);
+        }
+
+        /// A token at end of file with no trailing newline is correctly lexed.
+        #[test]
+        fn test_token_at_eof_no_newline() {
+            let text = "abc";
+            let lexemes = lex(text);
+            assert_eq!(lexemes.len(), 1);
+            assert_eq!(lexemes[0].text_end, 3);
+        }
+
+        /// `#const` is treated as a single lexeme.
+        #[test]
+        fn test_hash_const_is_single_lexeme() {
+            let text = "#const GOLD 66";
+            let lexemes = lex(text);
+            assert_eq!(lexemes[0].text(text), "#const");
+        }
+
+        /// `#define` is treated as a single lexeme.
+        #[test]
+        fn test_hash_define_is_single_lexeme() {
+            let text = "#define MY_LABEL";
+            let lexemes = lex(text);
+            assert_eq!(lexemes[0].text(text), "#define");
+        }
+
+        /// A math expression with a leading `(` attached to a token is a single
+        /// lexeme.
+        #[test]
+        fn test_leading_paren_attached_to_token() {
+            let text = "(A";
+            let lexemes = lex(text);
+            assert_eq!(lexemes.len(), 1);
+            assert_eq!(lexemes[0].text(text), "(A");
+        }
+
+        /// A math expression with a trailing `)` attached to a token is a single
+        /// lexeme.
+        #[test]
+        fn test_trailing_paren_attached_to_token() {
+            let text = "B)";
+            let lexemes = lex(text);
+            assert_eq!(lexemes.len(), 1);
+            assert_eq!(lexemes[0].text(text), "B)");
+        }
+
+        /// A whitespace-separated math expression produces multiple lexemes.
+        #[test]
+        fn test_whitespace_separated_math_expression() {
+            let text = "( A + B )";
+            let lexemes = lex(text);
+            let texts: Vec<&str> = lexemes.iter().map(|lexeme| lexeme.text(text)).collect();
+            assert_eq!(texts, vec!["(", "A", "+", "B", ")"]);
+        }
+
+        /// A math expression used as an argument produces the correct lexemes.
+        #[test]
+        fn test_math_expression_as_argument() {
+            let text = "number_of_objects (A + B)";
+            let lexemes = lex(text);
+            let texts: Vec<&str> = lexemes.iter().map(|lexeme| lexeme.text(text)).collect();
+            assert_eq!(texts, vec!["number_of_objects", "(A", "+", "B)"]);
+        }
+
+        /// Positions within a math expression are correct.
+        #[test]
+        fn test_math_expression_positions() {
+            let text = "( A )";
+            let lexemes = lex(text);
+            assert_eq!(lexemes[1].text(text), "A");
+            assert_eq!(lexemes[1].line_start, 2);
+            assert_eq!(lexemes[1].line_end, 3);
+        }
+    }
+
+    mod lexeme_text {
+        use super::*;
+
+        /// Returns the correct text for a lexeme on the first line.
+        #[test]
+        fn test_first_line() {
+            let text = "create_land";
+            let lexemes = lex(text);
+            assert_eq!(lexemes[0].text(text), "create_land");
+        }
+
+        /// Returns the correct text for a lexeme on the second line.
+        #[test]
+        fn test_second_line() {
+            let text = "abc\nterrain_type";
+            let lexemes = lex(text);
+            assert_eq!(lexemes[1].text(text), "terrain_type");
+        }
+
+        /// Returns the correct text for an indented lexeme.
+        #[test]
+        fn test_indented() {
+            let text = "\tterrain_type";
+            let lexemes = lex(text);
+            assert_eq!(lexemes[0].text(text), "terrain_type");
         }
     }
 }

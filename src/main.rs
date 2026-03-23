@@ -82,7 +82,7 @@ impl LanguageServer for Backend {
         // scripts (many maps are just a few hundred lines) during development.
         let text = params.content_changes.into_iter().next().unwrap().text;
         self.texts.write().await.insert(uri.clone(), text.clone());
-        let rms_doc = RmsDocument::new(text);
+        let rms_doc = parser::parse(text);
         self.documents.write().await.insert(uri, rms_doc);
     }
 
