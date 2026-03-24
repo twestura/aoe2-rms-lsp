@@ -1,0 +1,1035 @@
+# Unified language data for the AoE2 RMS language server.
+# Combines hover documentation paths and completion data for all tokens.
+#
+# Token IDs are from the RMS Equivalencies spreadsheet (rms-equivalences/).
+# Tokens not present in the spreadsheet omit the `id` field.
+#
+# Format:
+#   [section.NAME]           — section headers like <LAND_GENERATION>; NAME is written
+#                              without angle brackets (e.g. LAND_GENERATION, not <LAND_GENERATION>)
+#   [command.name]           — top-level commands inside a section block
+#   [attribute.name]         — attributes inside a command block
+#   [command_attribute.name] — valid as both command and attribute (base_terrain, base_layer)
+#   [keyword.name]           — preprocessor keywords (#define, if, start_random, etc.)
+#
+# Fields:
+#   id       = integer token ID from the equivalencies spreadsheet
+#   hover    = path to hover doc, relative to hover_docs/
+#   sections = ["NAME", ...] on commands and command_attributes; NAME without angle brackets
+#   commands = ["name", ...] on attributes and command_attributes
+#   repeatable = true if the token may appear more than once in its context (absent = false);
+#              only used on commands and attributes; sections are always repeatable, and
+#              keyword repeatability depends on context (e.g. multiple if/endif blocks)
+#   args     = [{ name = "X", kind = "Y" }, ...] argument specs
+#              add optional = true for optional args
+#
+# Argument kinds: "terrain", "object", "civilization", "map_type", "effect",
+#   "attribute_type", "resource_type", "technology_type", "unit_class",
+#   "cliff_type", "season_type", "water_definition", "assign_type",
+#   "player_data", "language_string_id", "condition", "label", "number",
+#   "filepath", "identifier"
+
+# ---------------------------------------------------------------------------
+# Sections
+# ---------------------------------------------------------------------------
+
+[section.PLAYER_SETUP]
+id = 11
+hover = "sections/player-setup.md"
+
+[section.LAND_GENERATION]
+id = 17
+hover = "sections/land-generation.md"
+
+[section.ELEVATION_GENERATION]
+id = 79
+hover = "sections/elevation-generation.md"
+
+[section.CLIFF_GENERATION]
+id = 34
+hover = "sections/cliff-generation.md"
+
+[section.TERRAIN_GENERATION]
+id = 42
+hover = "sections/terrain-generation.md"
+
+[section.CONNECTION_GENERATION]
+id = 62
+hover = "sections/connection-generation.md"
+
+[section.OBJECTS_GENERATION]
+id = 47
+hover = "sections/objects-generation.md"
+
+# ---------------------------------------------------------------------------
+# Commands — PLAYER_SETUP
+# ---------------------------------------------------------------------------
+
+[command.random_placement]
+id = 12
+sections = ["PLAYER_SETUP"]
+hover = "commands/random-placement.md"
+
+[command.direct_placement]
+id = 96
+sections = ["PLAYER_SETUP"]
+hover = "commands/direct-placement.md"
+
+[command.grouped_by_team]
+id = 13
+sections = ["PLAYER_SETUP"]
+hover = "commands/grouped-by-team.md"
+
+[command.nomad_resources]
+id = 95
+sections = ["PLAYER_SETUP"]
+hover = "commands/nomad-resources.md"
+
+[command.force_nomad_treaty]
+id = 129
+sections = ["PLAYER_SETUP"]
+hover = "commands/force-nomad-treaty.md"
+
+[command.behavior_version]
+id = 122
+sections = ["PLAYER_SETUP"]
+hover = "commands/behavior-version.md"
+args = [{ name = "VERSION_NUMBER", kind = "number" }]
+
+[command.override_map_size]
+id = 140
+sections = ["PLAYER_SETUP"]
+hover = "commands/override-map-size.md"
+args = [{ name = "SIDE_LENGTH", kind = "number" }]
+
+[command.set_gaia_civilization]
+id = 119
+sections = ["PLAYER_SETUP"]
+hover = "commands/set-gaia-civilization.md"
+args = [{ name = "CIVILIZATION", kind = "civilization" }]
+
+[command.ai_info_map_type]
+id = 90
+sections = ["PLAYER_SETUP"]
+hover = "commands/ai-info-map-type.md"
+args = [
+  { name = "MAP_TYPE", kind = "map_type" },
+  { name = "IS_NOMAD", kind = "number" },
+  { name = "IS_MICHI", kind = "number" },
+  { name = "SHOW_TYPE", kind = "number" },
+]
+
+[command.effect_amount]
+id = 121
+sections = ["PLAYER_SETUP"]
+hover = "commands/effect-amount.md"
+args = [
+  { name = "EFFECT_TYPE", kind = "effect" },
+  { name = "TYPE", kind = "number" },
+  { name = "ATTRIBUTE_TYPE", kind = "attribute_type" },
+  { name = "AMOUNT", kind = "number" },
+]
+
+[command.effect_percent]
+id = 124
+sections = ["PLAYER_SETUP"]
+hover = "commands/effect-percent.md"
+args = [
+  { name = "EFFECT_TYPE", kind = "effect" },
+  { name = "TYPE", kind = "number" },
+  { name = "ATTRIBUTE_TYPE", kind = "attribute_type" },
+  { name = "PERCENT", kind = "number" },
+]
+
+[command.guard_state]
+id = 98
+sections = ["PLAYER_SETUP"]
+hover = "commands/guard-state.md"
+args = [
+  { name = "OBJECT_TYPE", kind = "object" },
+  { name = "RESOURCE_TYPE", kind = "resource_type" },
+  { name = "RESOURCE_DELTA", kind = "number" },
+  { name = "FLAGS", kind = "number" },
+]
+
+[command.terrain_state]
+sections = ["PLAYER_SETUP"]
+hover = "commands/terrain-state.md"
+args = [
+  { name = "MODE", kind = "number" },
+  { name = "PARAMETER_1", kind = "number" },
+  { name = "PARAMETER_2", kind = "number" },
+  { name = "FLAGS", kind = "number" },
+]
+
+[command.weather_type]
+sections = ["PLAYER_SETUP"]
+hover = "commands/weather-type.md"
+args = [
+  { name = "PRECIPITATION_STYLE", kind = "number" },
+  { name = "LIVE_COLOR", kind = "number" },
+  { name = "FOG_COLOR", kind = "number" },
+  { name = "WATER_DIRECTION", kind = "number" },
+]
+
+[command.water_definition]
+id = 146
+sections = ["PLAYER_SETUP"]
+hover = "commands/water-definition.md"
+args = [{ name = "WATER_TYPE", kind = "water_definition" }]
+
+[command.enable_waves]
+id = 105
+sections = ["PLAYER_SETUP", "LAND_GENERATION"]
+hover = "commands/enable-waves.md"
+args = [{ name = "SHOW_WAVES", kind = "number" }]
+
+# ---------------------------------------------------------------------------
+# Commands — LAND_GENERATION
+# ---------------------------------------------------------------------------
+
+[command.create_player_lands]
+id = 20
+sections = ["LAND_GENERATION"]
+hover = "commands/create-player-lands.md"
+repeatable = true
+block = true
+
+[command.create_land]
+id = 32
+sections = ["LAND_GENERATION"]
+hover = "commands/create-land.md"
+repeatable = true
+block = true
+
+# ---------------------------------------------------------------------------
+# Commands — ELEVATION_GENERATION
+# ---------------------------------------------------------------------------
+
+[command.create_elevation]
+id = 80
+sections = ["ELEVATION_GENERATION"]
+hover = "commands/create-elevation.md"
+repeatable = true
+block = true
+args = [{ name = "MAX_HEIGHT", kind = "number" }]
+
+# ---------------------------------------------------------------------------
+# Commands — TERRAIN_GENERATION
+# ---------------------------------------------------------------------------
+
+[command.color_correction]
+id = 104
+sections = ["TERRAIN_GENERATION"]
+hover = "commands/color-correction.md"
+args = [{ name = "COLOR_CORRECTION", kind = "season_type" }]
+
+[command.create_terrain]
+id = 43
+sections = ["TERRAIN_GENERATION"]
+hover = "commands/create-terrain.md"
+repeatable = true
+block = true
+args = [{ name = "TERRAIN", kind = "terrain" }]
+
+# ---------------------------------------------------------------------------
+# Commands — CLIFF_GENERATION
+# ---------------------------------------------------------------------------
+
+[command.cliff_type]
+id = 142
+sections = ["CLIFF_GENERATION"]
+hover = "commands/cliff-type.md"
+args = [{ name = "CLIFF_TYPE", kind = "cliff_type" }]
+
+[command.min_number_of_cliffs]
+id = 35
+sections = ["CLIFF_GENERATION"]
+hover = "commands/min-number-of-cliffs.md"
+args = [{ name = "NUMBER", kind = "number" }]
+
+[command.max_number_of_cliffs]
+id = 36
+sections = ["CLIFF_GENERATION"]
+hover = "commands/max-number-of-cliffs.md"
+args = [{ name = "NUMBER", kind = "number" }]
+
+[command.min_length_of_cliff]
+id = 37
+sections = ["CLIFF_GENERATION"]
+hover = "commands/min-length-of-cliff.md"
+args = [{ name = "LENGTH", kind = "number" }]
+
+[command.max_length_of_cliff]
+id = 38
+sections = ["CLIFF_GENERATION"]
+hover = "commands/max-length-of-cliff.md"
+args = [{ name = "LENGTH", kind = "number" }]
+
+[command.cliff_curliness]
+id = 39
+sections = ["CLIFF_GENERATION"]
+hover = "commands/cliff-curliness.md"
+args = [{ name = "PERCENT", kind = "number" }]
+
+[command.min_distance_cliffs]
+id = 40
+sections = ["CLIFF_GENERATION"]
+hover = "commands/min-distance-cliffs.md"
+args = [{ name = "DISTANCE", kind = "number" }]
+
+[command.min_terrain_distance]
+id = 41
+sections = ["CLIFF_GENERATION"]
+hover = "commands/min-terrain-distance.md"
+args = [{ name = "DISTANCE", kind = "number" }]
+
+# ---------------------------------------------------------------------------
+# Commands — CONNECTION_GENERATION
+# ---------------------------------------------------------------------------
+
+[command.accumulate_connections]
+id = 126
+sections = ["CONNECTION_GENERATION"]
+hover = "commands/accumulate-connections.md"
+
+[command.create_connect_all_players_land]
+id = 63
+sections = ["CONNECTION_GENERATION"]
+hover = "commands/create-connect-all-players-land.md"
+repeatable = true
+block = true
+
+[command.create_connect_teams_lands]
+id = 64
+sections = ["CONNECTION_GENERATION"]
+hover = "commands/create-connect-teams-lands.md"
+repeatable = true
+block = true
+
+[command.create_connect_all_lands]
+id = 66
+sections = ["CONNECTION_GENERATION"]
+hover = "commands/create-connect-all-lands.md"
+repeatable = true
+block = true
+
+[command.create_connect_same_land_zones]
+id = 65
+sections = ["CONNECTION_GENERATION"]
+hover = "commands/create-connect-same-land-zones.md"
+repeatable = true
+block = true
+
+[command.create_connect_land_zones]
+id = 150
+sections = ["CONNECTION_GENERATION"]
+hover = "commands/create-connect-land-zones.md"
+repeatable = true
+block = true
+args = [
+  { name = "ZONE_1", kind = "number" },
+  { name = "ZONE_2", kind = "number" },
+]
+
+[command.create_connect_to_nonplayer_land]
+id = 103
+sections = ["CONNECTION_GENERATION"]
+hover = "commands/create-connect-to-nonplayer-land.md"
+repeatable = true
+block = true
+
+# ---------------------------------------------------------------------------
+# Commands — OBJECTS_GENERATION
+# ---------------------------------------------------------------------------
+
+[command.create_actor_area]
+id = 127
+sections = ["OBJECTS_GENERATION"]
+hover = "commands/create-actor-area.md"
+repeatable = true
+args = [
+  { name = "X", kind = "number" },
+  { name = "Y", kind = "number" },
+  { name = "ACTOR_AREA_ID", kind = "number" },
+  { name = "RADIUS", kind = "number" },
+]
+
+[command.create_object_group]
+id = 147
+sections = ["OBJECTS_GENERATION"]
+hover = "commands/create-object-group.md"
+repeatable = true
+block = true
+args = [{ name = "GROUP_NAME", kind = "identifier" }]
+
+[command.create_object]
+id = 48
+sections = ["OBJECTS_GENERATION"]
+hover = "commands/create-object.md"
+repeatable = true
+block = true
+args = [{ name = "OBJECT", kind = "object" }]
+
+# ---------------------------------------------------------------------------
+# Attributes — land (create_player_lands, create_land)
+# ---------------------------------------------------------------------------
+
+[attribute.terrain_type]
+id = 21
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/terrain-type.md"
+args = [{ name = "TERRAIN", kind = "terrain" }]
+
+[attribute.land_percent]
+id = 18
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/land-percent.md"
+args = [{ name = "PERCENT", kind = "number" }]
+
+[attribute.number_of_tiles]
+id = 74
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/number-of-tiles.md"
+args = [{ name = "NUMBER", kind = "number" }]
+
+[attribute.base_size]
+id = 22
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/base-size.md"
+args = [{ name = "RADIUS", kind = "number" }]
+
+[attribute.set_circular_base]
+id = 144
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/set-circular-base.md"
+
+[attribute.generate_mode]
+id = 151
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/generate-mode.md"
+args = [{ name = "MODE", kind = "number" }]
+
+[attribute.land_position]
+id = 71
+commands = ["create_land"]
+hover = "attributes/land-position.md"
+args = [
+  { name = "X", kind = "number" },
+  { name = "Y", kind = "number" },
+]
+
+[attribute.circle_radius]
+id = 101
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/circle-radius.md"
+args = [
+  { name = "RADIUS", kind = "number" },
+  { name = "VARIANCE", kind = "number", optional = true },
+]
+
+[attribute.left_border]
+id = 23
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/borders.md"
+args = [{ name = "PERCENT", kind = "number" }]
+
+[attribute.right_border]
+id = 24
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/borders.md"
+args = [{ name = "PERCENT", kind = "number" }]
+
+[attribute.top_border]
+id = 25
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/borders.md"
+args = [{ name = "PERCENT", kind = "number" }]
+
+[attribute.bottom_border]
+id = 26
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/borders.md"
+args = [{ name = "PERCENT", kind = "number" }]
+
+[attribute.border_fuzziness]
+id = 27
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/border-fuzziness.md"
+args = [{ name = "PERCENT", kind = "number" }]
+
+[attribute.clumping_factor]
+id = 73
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/clumping-factor.md"
+args = [{ name = "FACTOR", kind = "number" }]
+
+[attribute.land_conformity]
+id = 149
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/land-conformity.md"
+args = [{ name = "PERCENT", kind = "number" }]
+
+[attribute.base_elevation]
+id = 94
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/base-elevation.md"
+args = [{ name = "HEIGHT", kind = "number" }]
+
+[attribute.assign_to_player]
+id = 33
+commands = ["create_land"]
+hover = "attributes/assign-to-player.md"
+args = [{ name = "PLAYER_NUMBER", kind = "number" }]
+
+[attribute.assign_to]
+id = 99
+commands = ["create_land"]
+hover = "attributes/assign-to.md"
+args = [
+  { name = "ASSIGN_TARGET", kind = "assign_type" },
+  { name = "NUMBER", kind = "number" },
+  { name = "MODE", kind = "number" },
+  { name = "FLAGS", kind = "number" },
+]
+
+[attribute.zone]
+id = 28
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/zone.md"
+args = [{ name = "ZONE_NUMBER", kind = "number" }]
+
+[attribute.set_zone_by_team]
+id = 29
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/set-zone-by-team.md"
+
+[attribute.set_zone_randomly]
+id = 30
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/set-zone-randomly.md"
+
+[attribute.other_zone_avoidance_distance]
+id = 31
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/other-zone-avoidance-distance.md"
+args = [{ name = "TILES", kind = "number" }]
+
+[attribute.min_placement_distance]
+id = 86
+commands = ["create_player_lands", "create_land"]
+hover = "attributes/min-placement-distance.md"
+args = [{ name = "TILES", kind = "number" }]
+
+[attribute.land_id]
+id = 72
+commands = ["create_land"]
+hover = "attributes/land-id.md"
+args = [{ name = "LAND_ID_NUMBER", kind = "number" }]
+
+# ---------------------------------------------------------------------------
+# Attributes — elevation (create_elevation)
+# ---------------------------------------------------------------------------
+
+[attribute.number_of_clumps]
+id = 45
+commands = ["create_elevation", "create_terrain"]
+hover = "attributes/number-of-clumps.md"
+args = [{ name = "NUMBER", kind = "number" }]
+
+[attribute.spacing]
+id = 81
+commands = ["create_elevation"]
+hover = "attributes/spacing.md"
+args = [{ name = "NUMBER", kind = "number" }]
+
+[attribute.enable_balanced_elevation]
+id = 120
+commands = ["create_elevation"]
+hover = "attributes/enable-balanced-elevation.md"
+
+# ---------------------------------------------------------------------------
+# Attributes — terrain (create_terrain)
+# ---------------------------------------------------------------------------
+
+[attribute.beach_terrain]
+id = 136
+commands = ["create_terrain"]
+hover = "attributes/beach-terrain.md"
+args = [{ name = "TERRAIN", kind = "terrain" }]
+
+[attribute.terrain_mask]
+id = 100
+commands = ["create_terrain"]
+hover = "attributes/terrain-mask.md"
+args = [{ name = "LAYER", kind = "number" }]
+
+[attribute.spacing_to_other_terrain_types]
+id = 46
+commands = ["create_terrain"]
+hover = "attributes/spacing-to-other-terrain-types.md"
+args = [{ name = "DISTANCE", kind = "number" }]
+
+[attribute.spacing_to_specific_terrain]
+id = 152
+commands = ["create_terrain"]
+hover = "attributes/spacing-to-specific-terrain.md"
+args = [
+  { name = "TERRAIN", kind = "terrain" },
+  { name = "DISTANCE", kind = "number" },
+]
+
+[attribute.set_scale_by_size]
+id = 76
+commands = ["create_terrain"]
+hover = "attributes/set-scale-by-size.md"
+
+[attribute.set_scale_by_groups]
+id = 75
+commands = ["create_terrain"]
+hover = "attributes/set-scale-by-groups.md"
+
+[attribute.set_flat_terrain_only]
+id = 89
+commands = ["create_terrain"]
+hover = "attributes/set-flat-terrain-only.md"
+
+[attribute.set_avoid_player_start_areas]
+id = 77
+commands = ["create_terrain"]
+hover = "attributes/set-avoid-player-start-areas.md"
+args = [{ name = "DISTANCE", kind = "number", optional = true }]
+
+[attribute.height_limits]
+id = 88
+commands = ["create_terrain", "create_elevation"]
+hover = "attributes/height-limits.md"
+args = [
+  { name = "MIN", kind = "number" },
+  { name = "MAX", kind = "number" },
+]
+
+# ---------------------------------------------------------------------------
+# Attributes — connection (create_connect_*)
+# ---------------------------------------------------------------------------
+
+[attribute.default_terrain_replacement]
+id = 82
+commands = [
+  "create_connect_all_players_land",
+  "create_connect_teams_lands",
+  "create_connect_all_lands",
+  "create_connect_same_land_zones",
+  "create_connect_land_zones",
+  "create_connect_to_nonplayer_land",
+]
+hover = "attributes/default-terrain-replacement.md"
+args = [{ name = "TERRAIN", kind = "terrain" }]
+
+[attribute.replace_terrain]
+id = 83
+commands = [
+  "create_connect_all_players_land",
+  "create_connect_teams_lands",
+  "create_connect_all_lands",
+  "create_connect_same_land_zones",
+  "create_connect_land_zones",
+  "create_connect_to_nonplayer_land",
+]
+hover = "attributes/replace-terrain.md"
+repeatable = true
+args = [
+  { name = "OLD_TERRAIN", kind = "terrain" },
+  { name = "NEW_TERRAIN", kind = "terrain" },
+]
+
+[attribute.terrain_cost]
+id = 84
+commands = [
+  "create_connect_all_players_land",
+  "create_connect_teams_lands",
+  "create_connect_all_lands",
+  "create_connect_same_land_zones",
+  "create_connect_land_zones",
+  "create_connect_to_nonplayer_land",
+]
+hover = "attributes/terrain-cost.md"
+repeatable = true
+args = [
+  { name = "TERRAIN", kind = "terrain" },
+  { name = "COST", kind = "number" },
+]
+
+[attribute.terrain_size]
+id = 85
+commands = [
+  "create_connect_all_players_land",
+  "create_connect_teams_lands",
+  "create_connect_all_lands",
+  "create_connect_same_land_zones",
+  "create_connect_land_zones",
+  "create_connect_to_nonplayer_land",
+]
+hover = "attributes/terrain-size.md"
+repeatable = true
+args = [
+  { name = "TERRAIN", kind = "terrain" },
+  { name = "RADIUS", kind = "number" },
+  { name = "VARIANCE", kind = "number" },
+]
+
+# ---------------------------------------------------------------------------
+# Attributes — objects (create_object, create_object_group)
+# ---------------------------------------------------------------------------
+
+[attribute.add_object]
+id = 148
+commands = ["create_object", "create_object_group"]
+hover = "attributes/add-object.md"
+repeatable = true
+args = [
+  { name = "OBJECT", kind = "object" },
+  { name = "PERCENT", kind = "number" },
+]
+
+[attribute.number_of_objects]
+id = 51
+commands = ["create_object", "create_object_group"]
+hover = "attributes/number-of-objects.md"
+args = [{ name = "NUMBER", kind = "number" }]
+
+[attribute.number_of_groups]
+id = 50
+commands = ["create_object", "create_object_group"]
+hover = "attributes/number-of-groups.md"
+args = [{ name = "NUMBER", kind = "number" }]
+
+[attribute.group_variance]
+id = 52
+commands = ["create_object", "create_object_group"]
+hover = "attributes/group-variance.md"
+args = [{ name = "VARIANCE", kind = "number" }]
+
+[attribute.group_placement_radius]
+id = 53
+commands = ["create_object", "create_object_group"]
+hover = "attributes/group-placement-radius.md"
+args = [{ name = "RADIUS", kind = "number" }]
+
+[attribute.set_tight_grouping]
+id = 55
+commands = ["create_object", "create_object_group"]
+hover = "attributes/set-tight-grouping.md"
+
+[attribute.set_loose_grouping]
+id = 54
+commands = ["create_object", "create_object_group"]
+hover = "attributes/set-loose-grouping.md"
+
+[attribute.min_connected_tiles]
+id = 125
+commands = ["create_object", "create_object_group"]
+hover = "attributes/min-connected-tiles.md"
+args = [{ name = "NUMBER", kind = "number" }]
+
+[attribute.resource_delta]
+id = 97
+commands = ["create_object", "create_object_group"]
+hover = "attributes/resource-delta.md"
+args = [{ name = "NUMBER", kind = "number" }]
+
+[attribute.second_object]
+id = 116
+commands = ["create_object", "create_object_group"]
+hover = "attributes/second-object.md"
+args = [{ name = "OBJECT", kind = "object" }]
+
+[attribute.set_scaling_to_map_size]
+id = 49
+commands = ["create_object", "create_object_group"]
+hover = "attributes/set-scaling-to-map-size.md"
+
+[attribute.set_scaling_to_player_number]
+id = 87
+commands = ["create_object", "create_object_group"]
+hover = "attributes/set-scaling-to-player-number.md"
+
+[attribute.set_place_for_every_player]
+id = 58
+commands = ["create_object", "create_object_group"]
+hover = "attributes/set-place-for-every-player.md"
+
+[attribute.place_on_specific_land_id]
+id = 59
+commands = ["create_object", "create_object_group"]
+hover = "attributes/place-on-specific-land-id.md"
+args = [{ name = "LAND_ID", kind = "number" }]
+
+[attribute.avoid_other_land_zones]
+id = 145
+commands = ["create_object", "create_object_group"]
+hover = "attributes/avoid-other-land-zones.md"
+args = [{ name = "DISTANCE", kind = "number" }]
+
+[attribute.generate_for_first_land_only]
+id = 139
+commands = ["create_object", "create_object_group"]
+hover = "attributes/generate-for-first-land-only.md"
+
+[attribute.set_gaia_object_only]
+id = 57
+commands = ["create_object", "create_object_group"]
+hover = "attributes/set-gaia-object-only.md"
+
+[attribute.set_gaia_unconvertible]
+id = 118
+commands = ["create_object", "create_object_group"]
+hover = "attributes/set-gaia-unconvertible.md"
+
+[attribute.set_building_capturable]
+id = 138
+commands = ["create_object", "create_object_group"]
+hover = "attributes/set-building-capturable.md"
+
+[attribute.make_indestructible]
+id = 131
+commands = ["create_object", "create_object_group"]
+hover = "attributes/make-indestructible.md"
+
+[attribute.min_distance_to_players]
+id = 60
+commands = ["create_object", "create_object_group"]
+hover = "attributes/distance-to-players.md"
+args = [{ name = "DISTANCE", kind = "number" }]
+
+[attribute.max_distance_to_players]
+id = 61
+commands = ["create_object", "create_object_group"]
+hover = "attributes/distance-to-players.md"
+args = [{ name = "DISTANCE", kind = "number" }]
+
+[attribute.set_circular_placement]
+id = 135
+commands = ["create_object", "create_object_group"]
+hover = "attributes/set-circular-placement.md"
+
+[attribute.terrain_to_place_on]
+id = 56
+commands = ["create_object", "create_object_group"]
+hover = "attributes/terrain-to-place-on.md"
+args = [{ name = "TERRAIN", kind = "terrain" }]
+
+[attribute.layer_to_place_on]
+id = 114
+commands = ["create_object", "create_object_group"]
+hover = "attributes/layer-to-place-on.md"
+args = [{ name = "TERRAIN", kind = "terrain" }]
+
+[attribute.ignore_terrain_restrictions]
+id = 130
+commands = ["create_object", "create_object_group"]
+hover = "attributes/ignore-terrain-restrictions.md"
+
+[attribute.max_distance_to_other_zones]
+id = 91
+commands = ["create_object", "create_object_group"]
+hover = "attributes/max-distance-to-other-zones.md"
+args = [{ name = "DISTANCE", kind = "number" }]
+
+[attribute.place_on_forest_zone]
+id = 106
+commands = ["create_object", "create_object_group"]
+hover = "attributes/place-on-forest-zone.md"
+
+[attribute.avoid_forest_zone]
+id = 107
+commands = ["create_object", "create_object_group"]
+hover = "attributes/avoid-forest-zone.md"
+args = [{ name = "DISTANCE", kind = "number", optional = true }]
+
+[attribute.avoid_cliff_zone]
+id = 117
+commands = ["create_object", "create_object_group"]
+hover = "attributes/avoid-cliff-zone.md"
+args = [{ name = "DISTANCE", kind = "number", optional = true }]
+
+[attribute.min_distance_to_map_edge]
+id = 132
+commands = ["create_object", "create_object_group"]
+hover = "attributes/min-distance-to-map-edge.md"
+args = [{ name = "DISTANCE", kind = "number" }]
+
+[attribute.min_distance_group_placement]
+id = 78
+commands = ["create_object", "create_object_group"]
+hover = "attributes/min-distance-group-placement.md"
+args = [{ name = "DISTANCE", kind = "number" }]
+
+[attribute.temp_min_distance_group_placement]
+id = 93
+commands = ["create_object", "create_object_group"]
+hover = "attributes/temp-min-distance-group-placement.md"
+args = [{ name = "DISTANCE", kind = "number" }]
+
+[attribute.find_closest]
+id = 108
+commands = ["create_object", "create_object_group"]
+hover = "attributes/find-closest.md"
+
+[attribute.find_closest_to_map_center]
+id = 134
+commands = ["create_object", "create_object_group"]
+hover = "attributes/find-closest-to-map-center.md"
+
+[attribute.find_closest_to_map_edge]
+id = 133
+commands = ["create_object", "create_object_group"]
+hover = "attributes/find-closest-to-map-edge.md"
+
+[attribute.enable_tile_shuffling]
+id = 137
+commands = ["create_object", "create_object_group"]
+hover = "attributes/enable-tile-shuffling.md"
+
+[attribute.require_path]
+id = 143
+commands = ["create_object", "create_object_group"]
+hover = "attributes/require-path.md"
+args = [{ name = "DEVIATION", kind = "number" }]
+
+[attribute.force_placement]
+id = 115
+commands = ["create_object", "create_object_group"]
+hover = "attributes/force-placement.md"
+
+[attribute.actor_area]
+id = 109
+commands = ["create_object", "create_object_group"]
+hover = "attributes/actor-area.md"
+args = [{ name = "ACTOR_AREA_ID", kind = "number" }]
+
+[attribute.actor_area_radius]
+id = 110
+commands = ["create_object", "create_object_group"]
+hover = "attributes/actor-area-radius.md"
+args = [{ name = "RADIUS", kind = "number" }]
+
+[attribute.override_actor_radius_if_required]
+id = 128
+commands = ["create_object", "create_object_group"]
+hover = "attributes/override-actor-radius-if-required.md"
+
+[attribute.actor_area_to_place_in]
+id = 111
+commands = ["create_object", "create_object_group"]
+hover = "attributes/actor-area-to-place-in.md"
+args = [{ name = "ACTOR_AREA_ID", kind = "number" }]
+
+[attribute.avoid_actor_area]
+id = 112
+commands = ["create_object", "create_object_group"]
+hover = "attributes/avoid-actor-area.md"
+repeatable = true
+args = [{ name = "ACTOR_AREA_ID", kind = "number" }]
+
+[attribute.avoid_all_actor_areas]
+id = 113
+commands = ["create_object", "create_object_group"]
+hover = "attributes/avoid-all-actor-areas.md"
+
+[attribute.set_facet]
+id = 141
+commands = ["create_object", "create_object_group"]
+hover = "attributes/set-facet.md"
+args = [{ name = "FACET_NUMBER", kind = "number" }]
+
+[attribute.match_player_civ]
+commands = ["create_object", "create_object_group"]
+hover = "attributes/match-player-civ.md"
+
+# ---------------------------------------------------------------------------
+# Command-attributes (valid as both command and attribute depending on context)
+# ---------------------------------------------------------------------------
+
+[command_attribute.base_terrain]
+id = 19
+sections = ["LAND_GENERATION", "ELEVATION_GENERATION", "TERRAIN_GENERATION"]
+commands = ["create_player_lands", "create_land", "create_elevation", "create_terrain"]
+hover = "command-attributes/base-terrain.md"
+args = [{ name = "TERRAIN", kind = "terrain" }]
+
+[command_attribute.base_layer]
+id = 102
+sections = ["TERRAIN_GENERATION"]
+commands = ["create_terrain"]
+hover = "command-attributes/base-layer.md"
+args = [{ name = "TERRAIN", kind = "terrain" }]
+
+# ---------------------------------------------------------------------------
+# Keywords
+# ---------------------------------------------------------------------------
+
+[keyword.else]
+id = 5
+hover = "keywords/else.md"
+
+[keyword.if]
+id = 3
+hover = "keywords/if.md"
+args = [{ name = "CONDITION", kind = "condition" }]
+snippet = "if ${1:CONDITION}\n\t$0\nendif"
+
+[keyword.elseif]
+id = 4
+hover = "keywords/elseif.md"
+args = [{ name = "CONDITION", kind = "condition" }]
+
+[keyword.endif]
+id = 6
+hover = "keywords/endif.md"
+
+[keyword.start_random]
+id = 7
+hover = "keywords/start-random.md"
+snippet = "start_random\n\tpercent_chance ${1:PERCENT} $0\nend_random"
+
+[keyword.end_random]
+id = 9
+hover = "keywords/end-random.md"
+
+[keyword.percent_chance]
+id = 8
+hover = "keywords/percent-chance.md"
+args = [{ name = "PERCENT", kind = "number" }]
+snippet = "percent_chance ${1:PERCENT} $0"
+
+[keyword.rnd]
+hover = "keywords/rnd.md"
+args = [
+  { name = "min", kind = "number" },
+  { name = "max", kind = "number" },
+]
+snippet = "rnd(${1:min},${2:max})"
+
+[keyword."#define"]
+id = 0
+hover = "keywords/define.md"
+args = [{ name = "LABEL", kind = "identifier" }]
+
+[keyword."#const"]
+id = 2
+hover = "keywords/const.md"
+args = [
+  { name = "IDENTIFIER", kind = "identifier" },
+  { name = "VALUE", kind = "number" },
+]
+
+[keyword."#include_drs"]
+id = 92
+hover = "keywords/include-drs.md"
+args = [{ name = "FILEPATH", kind = "filepath" }]
+
+[keyword."#includeXS"]
+id = 123
+hover = "keywords/includexs.md"
+args = [{ name = "FILEPATH", kind = "filepath" }]

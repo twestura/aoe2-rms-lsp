@@ -7,3 +7,7 @@ license = "GPL-3.0-or-later"
 [dependencies]
 tokio = { version = "=1.44.0", features = ["full"] }
 tower-lsp = "0.20.0"
+
+[build-dependencies]
+toml = "1.1.0"
+serde = { version = "1", features = ["derive"] }
