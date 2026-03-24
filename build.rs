@@ -208,7 +208,7 @@ fn hover_pairs_to_rust(pairs: &[(String, String)]) -> String {
     output.push_str("pub fn lookup_hover(name: &str) -> Option<&'static str> {\n");
     output.push_str("    match name {\n");
     for (name, doc_path) in pairs {
-        let path = format!("hover_docs/{doc_path}");
+        let path = format!("data/hover_docs/{doc_path}");
         let content =
             fs::read_to_string(&path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
         assert!(
@@ -234,7 +234,7 @@ fn hover_pairs_to_rust(pairs: &[(String, String)]) -> String {
 fn generate_hover(out_dir: &str) {
     let dest = Path::new(out_dir).join("hover.rs");
     println!("cargo:rerun-if-changed=data/hover.toml");
-    println!("cargo:rerun-if-changed=hover_docs/");
+    println!("cargo:rerun-if-changed=data/hover_docs/");
     let toml = fs::read_to_string("data/hover.toml")
         .unwrap_or_else(|e| panic!("Failed to read data/hover.toml: {e}"));
     let pairs = read_hover_pairs(&toml);
