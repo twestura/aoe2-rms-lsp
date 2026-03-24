@@ -16,6 +16,15 @@
 //! Reads `data/hover.toml` and generates `OUT_DIR/hover.rs` containing
 //! `lookup_hover(name: &str) -> Option<&'static str>`, with hover doc
 //! content embedded as string literals.
+//!
+//! ## Completions pipeline
+//! Reads `data/completions.toml` and generates `OUT_DIR/completions.rs`
+//! containing `static COMPLETABLE_TOKENS: &[CompletableToken]`. The TOML
+//! section a token belongs to (`[sections]`, `[commands]`, `[attributes]`,
+//! `[keywords]`) determines its `CompletionItemKind` in the generated array:
+//! ```text
+//! CompletableToken { label: "create_land", lower: "create_land", kind: CompletionItemKind::FUNCTION, snippet: Some("create_land {\n\t$0\n}") },
+//! ```
 
 use std::{env, ffi::OsStr, fs, path::Path};
 
@@ -88,12 +97,12 @@ impl PredefinedKind {
     ///
     /// # Examples
     ///
-    /// For `GenerateKind::Constants` with `line = "GRASS,0"`:
+    /// For `PredefinedKind::Constants` with `line = "GRASS,0"`:
     /// ```text
     ///     ("GRASS", 0),
     /// ```
     ///
-    /// For `GenerateKind::Labels` with `line = "DEATH_MATCH"`:
+    /// For `PredefinedKind::Labels` with `line = "DEATH_MATCH"`:
     /// ```text
     ///     "DEATH_MATCH",
     /// ```
@@ -181,7 +190,7 @@ fn generate_predefined(out_dir: &str, kind: PredefinedKind) {
 /// ```
 /// `token_name`s that contain the characters <, >, or # are quoted.
 ///
-/// Note that comments in the toml file must be on their own line.
+/// Comments in the toml file must be on their own line.
 fn read_hover_pairs(toml: &str) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     for line in toml.lines() {
@@ -242,10 +251,143 @@ fn generate_hover(out_dir: &str) {
     fs::write(&dest, &output).unwrap_or_else(|e| panic!("Failed to write {dest:?}: {e}"));
 }
 
+/// A single entry parsed from `data/completions.toml`.
+struct CompletionEntry {
+    /// The display label shown in the completion popup, with correct casing.
+    label: String,
+    /// The Rust expression for the `CompletionItemKind` constant, e.g.
+    /// `"CompletionItemKind::FUNCTION"`. See:
+    /// <https://docs.rs/lsp-types/latest/lsp_types/struct.CompletionItemKind.html>
+    kind: &'static str,
+    /// The snippet to insert when the completion is accepted, or `None` if
+    /// the label should be inserted as-is.
+    snippet: Option<String>,
+}
+
+impl CompletionEntry {
+    /// Returns a line of Rust source representing this entry as a
+    /// `CompletableToken` struct literal, suitable for inclusion in the
+    /// `COMPLETABLE_TOKENS` static array.
+    ///
+    /// The `lower` field is derived from `label` via `to_ascii_lowercase`.
+    /// A `None` snippet produces `snippet: None`; a `Some(s)` snippet
+    /// produces `snippet: Some("s")`.
+    ///
+    /// # Example
+    ///
+    /// For an entry with `label = "create_land"`, `kind = "CompletionItemKind::FUNCTION"`,
+    /// and `snippet = Some("create_land {\n\t$0\n}")`:
+    /// ```text
+    ///     CompletableToken { label: "create_land", lower: "create_land", kind: CompletionItemKind::FUNCTION, snippet: Some("create_land {\n\t$0\n}") },
+    /// ```
+    fn to_rust(&self) -> String {
+        let label = &self.label;
+        let lower = self.label.to_ascii_lowercase();
+        let kind = self.kind;
+        let snippet = match &self.snippet {
+            None => "None".to_string(),
+            Some(s) => format!("Some(\"{s}\")"),
+        };
+        format!(
+            "    CompletableToken {{ label: \"{label}\", lower: \"{lower}\", kind: {kind}, snippet: {snippet} }},\n",
+        )
+    }
+}
+
+/// Returns entries parsed from the given completions TOML string.
+///
+/// Section headers (`[sections]`, `[commands]`, etc.) determine the
+/// `CompletionItemKind` for the entries that follow. Each entry line has the
+/// format:
+/// ```toml
+/// token_name = "snippet"
+/// ```
+/// An empty string value (`""`) means no snippet; the label is inserted as-is
+/// (`snippet: None` in the generated code).
+/// Keys containing `<`, `>`, or `#` are quoted.
+///
+/// Comments and blank lines are ignored. Comments must be on their own line.
+fn read_completion_entries(toml: &str) -> Vec<CompletionEntry> {
+    let mut entries = vec![];
+    let mut current_kind = None;
+    for line in toml.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        // Parses a section header, setting the current kind for entries that follow.
+        if line.starts_with('[') && line.ends_with(']') {
+            let section = &line[1..line.len() - 1];
+            current_kind = Some(match section {
+                "sections" => "CompletionItemKind::MODULE",
+                "commands" => "CompletionItemKind::FUNCTION",
+                "attributes" => "CompletionItemKind::PROPERTY",
+                "keywords" => "CompletionItemKind::KEYWORD",
+                _ => panic!("Unknown section in data/completions.toml: {section:?}"),
+            });
+            continue;
+        }
+
+        // Parses a key-value pair, adding it to the entries with the current kind.
+        let kind = current_kind.unwrap_or_else(|| {
+            panic!("Entry before any section in data/completions.toml: {line:?}")
+        });
+        let (key, value) = line
+            .split_once('=')
+            .unwrap_or_else(|| panic!("Invalid line in data/completions.toml: {line:?}"));
+        let label = key.trim().trim_matches('"').to_string();
+        let snippet = match value.trim().trim_matches('"') {
+            "" => None,
+            s => Some(s.to_string()),
+        };
+        entries.push(CompletionEntry {
+            label,
+            kind,
+            snippet,
+        });
+    }
+    entries
+}
+
+/// Turns completion entries into the Rust source for `completions.rs`,
+/// producing a `static COMPLETABLE_TOKENS` array with one entry per token.
+///
+/// Note: snippet strings containing `"` are not supported and will produce
+/// invalid Rust source. None of the current snippets contain double quotation
+/// marks.
+fn completion_entries_to_rust(entries: &[CompletionEntry]) -> String {
+    let mut output = String::new();
+    output.push_str("/// All tokens that are recognized by the language server and can be offered as\n");
+    output.push_str("/// completion suggestions, along with their lowercase forms for case-insensitive\n");
+    output.push_str("/// matching, their kinds for coloring and icons in the completion popup, and\n");
+    output.push_str("/// optional snippets for expanding to full syntax with placeholders.\n");
+    output.push_str("static COMPLETABLE_TOKENS: &[CompletableToken] = &[\n");
+    output.extend(entries.iter().map(CompletionEntry::to_rust));
+    output.push_str("];\n");
+    output
+}
+
+/// Generates Rust source from `data/completions.toml` and writes it to
+/// `OUT_DIR/completions.rs`. The output file defines:
+/// ```rust
+/// static COMPLETABLE_TOKENS: &[CompletableToken]
+/// ```
+fn generate_completions(out_dir: &str) {
+    let dest = Path::new(out_dir).join("completions.rs");
+    println!("cargo:rerun-if-changed=data/completions.toml");
+    let toml = fs::read_to_string("data/completions.toml")
+        .unwrap_or_else(|e| panic!("Failed to read data/completions.toml: {e}"));
+    let entries = read_completion_entries(&toml);
+    let output = completion_entries_to_rust(&entries);
+    fs::write(&dest, &output).unwrap_or_else(|e| panic!("Failed to write {dest:?}: {e}"));
+}
+
 /// Generates Rust source files from all data files in `data/`.
 fn main() {
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
     generate_predefined(&out_dir, PredefinedKind::Constants);
     generate_predefined(&out_dir, PredefinedKind::Labels);
     generate_hover(&out_dir);
+    generate_completions(&out_dir);
 }
