@@ -2,9 +2,13 @@
 
 mod arguments;
 mod document;
+mod lexeme;
 mod lexer;
 mod predefined;
+mod range;
 mod tokenizer;
+
+pub use range::ByteRange;
 
 pub use document::RmsDocument;
 
