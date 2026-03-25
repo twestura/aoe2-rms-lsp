@@ -71,7 +71,7 @@ impl LanguageServer for Backend {
         let text = params.text_document.text;
         // TODO replace the basic text document with the parsed doc.
         self.texts.write().await.insert(uri.clone(), text.clone());
-        let rms_doc = parser::parse(text);
+        let rms_doc = RmsDocument::parse(text);
         self.documents.write().await.insert(uri, rms_doc);
     }
 
@@ -82,7 +82,7 @@ impl LanguageServer for Backend {
         // scripts (many maps are just a few hundred lines) during development.
         let text = params.content_changes.into_iter().next().unwrap().text;
         self.texts.write().await.insert(uri.clone(), text.clone());
-        let rms_doc = parser::parse(text);
+        let rms_doc = RmsDocument::parse(text);
         self.documents.write().await.insert(uri, rms_doc);
     }
 

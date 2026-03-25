@@ -1,20 +1,35 @@
 //! Parser for Aoe2 RMS files.
 
+use crate::parser::{line_offsets::LineOffsets, range::ByteRange};
+
 mod arguments;
+mod chunks;
 mod document;
-mod lexeme;
 mod lexer;
+mod line_offsets;
 mod predefined;
 mod range;
 mod tokenizer;
 
-pub use range::ByteRange;
+#[derive(Debug)]
+pub struct RmsDocument {
+    text: String,
+    line_offsets: LineOffsets,
+    tokens: Vec<Vec<Token>>,
+}
 
-pub use document::RmsDocument;
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Token {
+    range: ByteRange,
+}
 
-/// TODO
-pub fn parse(text: String) -> RmsDocument {
-    let lexemes = lexer::lex(&text);
-    let tokens = tokenizer::tokenize(&text, lexemes);
-    RmsDocument::new(text, tokens)
+impl RmsDocument {
+    pub fn parse(text: String) -> Self {
+        let (chunks, line_offsets) = chunks::chunk_text(&text);
+        Self {
+            text,
+            line_offsets: line_offsets,
+            tokens: vec![],
+        }
+    }
 }
