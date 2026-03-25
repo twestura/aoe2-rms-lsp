@@ -10,10 +10,22 @@ use crate::parser::{
 };
 
 /// A textual token in an Aoe2 RMS document.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Token {
     /// The range of bytes in the document that this token occupies.
     range: ByteRange,
+}
+
+impl Token {
+    /// Returns the start byte offset of this token, inclusive.
+    pub fn start(&self) -> usize {
+        self.range.start()
+    }
+
+    /// Returns the end byte offset of this token, exclusive.
+    pub fn end(&self) -> usize {
+        self.range.end()
+    }
 }
 
 /// Tokenizes the given text into a vector of tokens, grouped by line.
@@ -28,6 +40,7 @@ pub fn tokenize(text: &str, chunks: &[Chunk], line_offsets: &LineOffsets) -> Vec
     let mut comment_depth = 0u32;
     // Invariant: `lineno` is the line number of `chunk.start()`.
     for chunk in chunks {
+        debug_assert!(chunk.end() <= text.len());
         match chunk.kind() {
             Whitespace => {
                 // After this loop, lineno is the line containing chunk.end().

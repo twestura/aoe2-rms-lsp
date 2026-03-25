@@ -38,144 +38,229 @@ impl RmsDocument {
         }
     }
 
-    // TODO
-    // Returns the token at the given line and column, if one exists.
-    // - `lineno`: The 0-based line index.
-    // - `col`: The 0-based column index.
-    // pub fn token_at(&self, lineno: usize, col: usize) -> Option<Token> {
-    //     use std::cmp::Ordering::*;
-    //     let line = self.line_index.get(lineno)?;
-    //     line.binary_search_by(|i| {
-    //         let token = &self.tokens[*i];
-    //         if col < token.line_start() {
-    //             Greater
-    //         } else if col >= token.line_end() {
-    //             Less
-    //         } else {
-    //             Equal
-    //         }
-    //     })
-    //     .ok() // Discard the error result if a token is not found.
-    //     .map(|i| self.tokens[line[i]])
-    // }
+    /// Returns the byte offset of the given line and column,
+    /// if it is within the document.
+    pub fn offset_at(&self, lineno: usize, col: usize) -> Option<usize> {
+        let line_start = self.line_offsets.get(lineno)?;
+        let next_line_start = self.line_offsets.get(lineno + 1).unwrap_or(self.text.len());
+        let offset = line_start + col;
+        (offset < next_line_start).then_some(offset)
+    }
+
+    /// Returns the source text of the given token.
+    pub fn token_text(&self, token: Token) -> &str {
+        &self.text[token.start()..token.end()]
+    }
+
+    /// Returns the token at the given line and column, if one exists.
+    /// - `lineno`: The 0-based line index.
+    /// - `col`: The 0-based column index.
+    pub fn token_at(&self, lineno: usize, col: usize) -> Option<Token> {
+        use std::cmp::Ordering::*;
+        let offset = self.offset_at(lineno, col)?;
+        let token_line = self.tokens.get(lineno)?;
+        token_line
+            .binary_search_by(|token| {
+                if offset < token.start() {
+                    Greater
+                } else if offset >= token.end() {
+                    Less
+                } else {
+                    Equal
+                }
+            })
+            .ok() // Discard the error result if a token is not found.
+            .map(|i| token_line[i])
+    }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::parser::{lexer::lex, tokenizer::tokenize};
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     fn parse(text: &str) -> RmsDocument {
-//         let text = text.to_string();
-//         let tokens = tokenize(&text, lex(&text));
-//         RmsDocument::new(text, tokens)
-//     }
+    /// Parses `text` into an `RmsDocument`.
+    fn parse(text: &str) -> RmsDocument {
+        RmsDocument::parse(text.to_string())
+    }
 
-//     mod token_at {
-//         use super::*;
+    mod offset_at {
+        use super::*;
 
-//         /// A position within a token returns that token.
-//         #[test]
-//         fn test_within_token() {
-//             let doc = parse("create_land");
-//             let token = doc.token_at(0, 5).unwrap();
-//             assert_eq!(token.text(&doc.text), "create_land");
-//         }
+        /// A column in the middle of the only line returns the correct absolute offset.
+        #[test]
+        fn col_on_single_line() {
+            let doc = parse("create_land");
+            assert_eq!(doc.offset_at(0, 5), Some(5));
+        }
 
-//         /// A position at the start of a token returns that token.
-//         #[test]
-//         fn test_at_start_of_token() {
-//             let doc = parse("create_land");
-//             let token = doc.token_at(0, 0).unwrap();
-//             assert_eq!(token.text(&doc.text), "create_land");
-//         }
+        /// A column on the second line is added to that line's start offset.
+        #[test]
+        fn col_on_second_line() {
+            let doc = parse("abc\ndefgh");
+            // Line 1 starts at offset 4; col 2 → offset 6.
+            assert_eq!(doc.offset_at(1, 2), Some(6));
+        }
 
-//         /// A position at the last character of a token returns that token.
-//         #[test]
-//         fn test_at_last_character_of_token() {
-//             let doc = parse("create_land");
-//             let token = doc.token_at(0, 10).unwrap();
-//             assert_eq!(token.text(&doc.text), "create_land");
-//         }
+        /// Column 0 on any line returns that line's start offset.
+        #[test]
+        fn col_zero_returns_line_start() {
+            let doc = parse("abc\ndefgh");
+            assert_eq!(doc.offset_at(1, 0), Some(4));
+        }
 
-//         /// A position on whitespace between tokens returns None.
-//         #[test]
-//         fn test_whitespace_returns_none() {
-//             let doc = parse("terrain_type GRASS");
-//             assert!(doc.token_at(0, 12).is_none());
-//         }
+        /// A column pointing at the newline character is within the line's range
+        /// and returns Some.
+        #[test]
+        fn col_at_newline_returns_some() {
+            let doc = parse("abc\ndef");
+            // '\n' is at offset 3, which is col 3 on line 0.
+            assert_eq!(doc.offset_at(0, 3), Some(3));
+        }
 
-//         /// A position beyond the end of the line returns None.
-//         #[test]
-//         fn test_beyond_end_of_line_returns_none() {
-//             let doc = parse("create_land");
-//             assert!(doc.token_at(0, 100).is_none());
-//         }
+        /// A column one past the newline character is on the next line and
+        /// returns None.
+        #[test]
+        fn col_past_newline_returns_none() {
+            let doc = parse("abc\ndef");
+            assert_eq!(doc.offset_at(0, 4), None);
+        }
 
-//         /// A line number beyond the end of the document returns None.
-//         #[test]
-//         fn test_line_out_of_bounds_returns_none() {
-//             let doc = parse("create_land");
-//             assert!(doc.token_at(99, 0).is_none());
-//         }
+        /// A column beyond the end of the last line returns None.
+        #[test]
+        fn col_beyond_last_line_returns_none() {
+            let doc = parse("abc");
+            assert_eq!(doc.offset_at(0, 10), None);
+        }
 
-//         /// A position on the second line returns the correct token.
-//         #[test]
-//         fn test_second_line_token() {
-//             let doc = parse("create_land {\nterrain_type GRASS\n}");
-//             let token = doc.token_at(1, 5).unwrap();
-//             assert_eq!(token.text(&doc.text), "terrain_type");
-//         }
+        /// An out-of-bounds line number returns None.
+        #[test]
+        fn line_out_of_bounds_returns_none() {
+            let doc = parse("abc");
+            assert_eq!(doc.offset_at(99, 0), None);
+        }
 
-//         /// A position on the second token on a line returns the correct token.
-//         #[test]
-//         fn test_second_token_on_line() {
-//             let doc = parse("terrain_type GRASS");
-//             let token = doc.token_at(0, 13).unwrap();
-//             assert_eq!(token.text(&doc.text), "GRASS");
-//         }
+        /// Column 0 on an empty line (between two newlines) returns that
+        /// line's start offset.
+        #[test]
+        fn col_zero_on_empty_line() {
+            let doc = parse("abc\n\ndef");
+            // Line 1 is empty; its start offset is 4.
+            assert_eq!(doc.offset_at(1, 0), Some(4));
+        }
+    }
 
-//         /// A token inside a comment is correctly returned.
-//         #[test]
-//         fn test_token_inside_comment() {
-//             let doc = parse("/* comment */");
-//             let token = doc.token_at(0, 5).unwrap();
-//             assert_eq!(token.text(&doc.text), "comment");
-//             assert!(token.is_comment());
-//         }
+    mod token_at {
+        use super::*;
 
-//         /// A position on an empty line returns None.
-//         #[test]
-//         fn test_empty_line_returns_none() {
-//             let doc = parse("abc\n\ndef");
-//             assert!(doc.token_at(1, 0).is_none());
-//         }
+        /// A column in the interior of a token returns that token.
+        #[test]
+        fn col_within_token() {
+            let doc = parse("create_land");
+            assert_eq!(doc.token_text(doc.token_at(0, 5).unwrap()), "create_land");
+        }
 
-//         /// A document with many lines returns the correct token on each line.
-//         #[test]
-//         fn test_many_lines() {
-//             let doc = parse(
-//                 "<PLAYER_SETUP>\nrandom_placement\n\n<LAND_GENERATION>\nbase_terrain GRASS\ncreate_land {\nterrain_type DIRT\n}",
-//             );
-//             assert_eq!(
-//                 doc.token_at(0, 0).unwrap().text(&doc.text),
-//                 "<PLAYER_SETUP>"
-//             );
-//             assert_eq!(
-//                 doc.token_at(1, 0).unwrap().text(&doc.text),
-//                 "random_placement"
-//             );
-//             assert!(doc.token_at(2, 0).is_none());
-//             assert_eq!(
-//                 doc.token_at(3, 0).unwrap().text(&doc.text),
-//                 "<LAND_GENERATION>"
-//             );
-//             assert_eq!(doc.token_at(4, 0).unwrap().text(&doc.text), "base_terrain");
-//             assert_eq!(doc.token_at(4, 13).unwrap().text(&doc.text), "GRASS");
-//             assert_eq!(doc.token_at(5, 0).unwrap().text(&doc.text), "create_land");
-//             assert_eq!(doc.token_at(6, 0).unwrap().text(&doc.text), "terrain_type");
-//             assert_eq!(doc.token_at(6, 13).unwrap().text(&doc.text), "DIRT");
-//             assert_eq!(doc.token_at(7, 0).unwrap().text(&doc.text), "}");
-//         }
-//     }
-// }
+        /// A column at the first character of a token returns that token.
+        #[test]
+        fn col_at_token_start() {
+            let doc = parse("create_land");
+            assert_eq!(doc.token_text(doc.token_at(0, 0).unwrap()), "create_land");
+        }
+
+        /// A column at the last character of a token returns that token.
+        #[test]
+        fn col_at_token_end() {
+            let doc = parse("create_land");
+            // "create_land" is 11 chars; last char is at col 10.
+            assert_eq!(
+                doc.token_text(doc.token_at(0, 10).unwrap()),
+                "create_land"
+            );
+        }
+
+        /// A column on whitespace between two tokens returns None.
+        #[test]
+        fn col_on_whitespace_returns_none() {
+            let doc = parse("terrain_type GRASS");
+            assert!(doc.token_at(0, 12).is_none());
+        }
+
+        /// A column beyond the end of the line returns None.
+        #[test]
+        fn col_beyond_line_returns_none() {
+            let doc = parse("create_land");
+            assert!(doc.token_at(0, 100).is_none());
+        }
+
+        /// A line number beyond the end of the document returns None.
+        #[test]
+        fn line_out_of_bounds_returns_none() {
+            let doc = parse("create_land");
+            assert!(doc.token_at(99, 0).is_none());
+        }
+
+        /// A column on the second token of a line returns that token.
+        #[test]
+        fn col_on_second_token() {
+            let doc = parse("terrain_type GRASS");
+            assert_eq!(doc.token_text(doc.token_at(0, 13).unwrap()), "GRASS");
+        }
+
+        /// A column on the second line returns the correct token on that line.
+        #[test]
+        fn col_on_second_line() {
+            let doc = parse("create_land {\nterrain_type GRASS\n}");
+            assert_eq!(
+                doc.token_text(doc.token_at(1, 5).unwrap()),
+                "terrain_type"
+            );
+        }
+
+        /// A column inside a comment block returns None because comments are stripped.
+        #[test]
+        fn col_inside_comment_returns_none() {
+            let doc = parse("/* comment */");
+            assert!(doc.token_at(0, 5).is_none());
+        }
+
+        /// A column on an empty line returns None.
+        #[test]
+        fn col_on_empty_line_returns_none() {
+            let doc = parse("abc\n\ndef");
+            assert!(doc.token_at(1, 0).is_none());
+        }
+
+        /// Tokens are correctly located across many lines with blank lines and
+        /// multiple tokens per line.
+        #[test]
+        fn many_lines() {
+            let doc = parse(
+                "<PLAYER_SETUP>\nrandom_placement\n\n<LAND_GENERATION>\nbase_terrain GRASS\ncreate_land {\nterrain_type DIRT\n}",
+            );
+            assert_eq!(
+                doc.token_text(doc.token_at(0, 0).unwrap()),
+                "<PLAYER_SETUP>"
+            );
+            assert_eq!(
+                doc.token_text(doc.token_at(1, 0).unwrap()),
+                "random_placement"
+            );
+            assert!(doc.token_at(2, 0).is_none());
+            assert_eq!(
+                doc.token_text(doc.token_at(3, 0).unwrap()),
+                "<LAND_GENERATION>"
+            );
+            assert_eq!(
+                doc.token_text(doc.token_at(4, 0).unwrap()),
+                "base_terrain"
+            );
+            assert_eq!(doc.token_text(doc.token_at(4, 13).unwrap()), "GRASS");
+            assert_eq!(doc.token_text(doc.token_at(5, 0).unwrap()), "create_land");
+            assert_eq!(
+                doc.token_text(doc.token_at(6, 0).unwrap()),
+                "terrain_type"
+            );
+            assert_eq!(doc.token_text(doc.token_at(6, 13).unwrap()), "DIRT");
+            assert_eq!(doc.token_text(doc.token_at(7, 0).unwrap()), "}");
+        }
+    }
+}
