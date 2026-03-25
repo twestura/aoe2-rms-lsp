@@ -1,211 +1,283 @@
 //! Tokenizer for the RMS language.
-//! Turns a sequence of lexemes into a sequence of tokens.
+//! Turns a sequence of text chunks into a sequence of tokens.
 //! The tokens are annotated with information needed for language server
 //! features.
 
-use crate::parser::lexer::Lexeme;
+use crate::parser::{
+    chunks::{Chunk, ChunkKind},
+    line_offsets::LineOffsets,
+    range::ByteRange,
+};
 
-/// Returns a sequence of tokens that annotate the lexemes with
-/// semantic information about their context in the RMS file.
-pub fn tokenize(rms_text: &str, lexemes: Vec<Lexeme>) -> Vec<Token> {
-    let mut tokens = vec![];
+/// A textual token in an Aoe2 RMS document.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Token {
+    /// The range of bytes in the document that this token occupies.
+    range: ByteRange,
+}
+
+/// Tokenizes the given text into a vector of tokens, grouped by line.
+/// - `text` is the original text of the document.
+/// - `chunks` is the list of ascii whitespace and non-whitespace substrings.
+/// - `line_offsets` is the start byte offset for each line..
+pub fn tokenize(text: &str, chunks: &[Chunk], line_offsets: &LineOffsets) -> Vec<Vec<Token>> {
+    use ChunkKind::*;
+    let num_lines = line_offsets.len();
+    let mut tokens = vec![vec![]; num_lines];
+    let mut lineno = 0;
     let mut comment_depth = 0u32;
-    for lexeme in lexemes {
-        let token_text = lexeme.text(rms_text);
-        match token_text {
-            "/*" => comment_depth = comment_depth.saturating_add(1),
-            "*/" if comment_depth > 0 => {
-                let is_comment = true;
-                tokens.push(Token { lexeme, is_comment });
-                comment_depth -= 1;
-                continue;
+    // Invariant: `lineno` is the line number of `chunk.start()`.
+    for chunk in chunks {
+        match chunk.kind() {
+            Whitespace => {
+                // After this loop, lineno is the line containing chunk.end().
+                // Uses <= because chunk.end() is the exclusive end of the whitespace chunk,
+                // so a line that starts exactly there is the line of the next text chunk.
+                while lineno + 1 < num_lines && line_offsets[lineno + 1] <= chunk.end() {
+                    lineno += 1;
+                }
             }
-            _ => {}
+            Text => match &text[chunk.start()..chunk.end()] {
+                "/*" => comment_depth = comment_depth.saturating_add(1),
+                "*/" if comment_depth > 0 => comment_depth -= 1,
+                _lexeme => {
+                    if comment_depth == 0 {
+                        tokens[lineno].push(Token {
+                            range: ByteRange::new(chunk.start(), chunk.end()),
+                        })
+                    }
+                }
+            },
         }
-        let is_comment = comment_depth > 0;
-        tokens.push(Token { lexeme, is_comment });
     }
     tokens
-}
-
-/// Represents a token in the RMS language.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Token {
-    /// The underlying text location of the token in the RMS file.
-    lexeme: Lexeme,
-    /// `true` if the token is within a comment, `false` otherwise.
-    is_comment: bool,
-}
-
-impl Token {
-    /// Returns the start byte index of the token in the RMS file (inclusive).
-    pub fn text_start(&self) -> usize {
-        self.lexeme.text_start
-    }
-
-    /// Returns the end byte index of the token in the RMS file (exclusive).
-    pub fn text_end(&self) -> usize {
-        self.lexeme.text_end
-    }
-
-    /// Returns the line number of the token in the RMS file.
-    pub fn lineno(&self) -> usize {
-        self.lexeme.lineno
-    }
-
-    /// Returns the start byte index of the token in the current line (inclusive).
-    pub fn line_start(&self) -> usize {
-        self.lexeme.line_start
-    }
-
-    /// Returns the end byte index of the token in the current line (exclusive).
-    pub fn line_end(&self) -> usize {
-        self.lexeme.line_end
-    }
-
-    /// Returns the text of the token as a `&str` slice from the RMS file.
-    /// Requires that the `text_start` and `text_end` indices are valid for the
-    /// source string.
-    pub fn text<'a>(&self, source: &'a str) -> &'a str {
-        self.lexeme.text(source)
-    }
-
-    /// Returns `true` if the token is within a comment, `false` otherwise.
-    pub fn is_comment(&self) -> bool {
-        self.is_comment
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::lexer::lex;
+    use crate::parser::chunks::chunk_text;
 
-    /// Helper function to tokenize a string using the lexer and tokenizer.
-    fn tokenize_text(text: &str) -> Vec<Token> {
-        tokenize(text, lex(text))
+    /// Runs the pipeline of chunking then tokenizing `text`.
+    fn tokenize_text(text: &str) -> Vec<Vec<Token>> {
+        let (chunks, line_offsets) = chunk_text(text);
+        tokenize(text, &chunks, &line_offsets)
+    }
+
+    /// Returns the text of the given `token` from `text`.
+    /// Requires the start and end indices of the token to be within the text.
+    fn token_text<'a>(token: &Token, text: &'a str) -> &'a str {
+        &text[token.range.start()..token.range.end()]
     }
 
     mod tokenize {
         use super::*;
 
-        /// An empty string produces no tokens.
+        /// An empty string produces one row with no tokens.
         #[test]
-        fn test_empty() {
-            assert!(tokenize_text("").is_empty());
+        fn empty_text_one_empty_row() {
+            let rows = tokenize_text("");
+            assert_eq!(rows.len(), 1);
+            assert!(rows[0].is_empty());
         }
 
-        /// A plain token outside a comment is not marked as a comment.
+        /// A single token on the first line is placed in row 0.
         #[test]
-        fn test_plain_token_not_comment() {
+        fn single_token_in_row_zero() {
             let text = "create_land";
-            let tokens = tokenize_text(text);
-            assert_eq!(tokens.len(), 1);
-            assert!(!tokens[0].is_comment());
+            let rows = tokenize_text(text);
+            assert_eq!(rows[0].len(), 1);
+            assert_eq!(token_text(&rows[0][0], text), "create_land");
         }
 
-        /// The opening comment delimiter is marked as a comment.
+        /// Two space-separated tokens on the same line are both placed in row 0.
         #[test]
-        fn test_comment_open_is_comment() {
-            let text = "/* comment */";
-            let tokens = tokenize_text(text);
-            assert!(tokens[0].is_comment());
-        }
-
-        /// The closing comment delimiter is marked as a comment.
-        #[test]
-        fn test_comment_close_is_comment() {
-            let text = "/* comment */";
-            let tokens = tokenize_text(text);
-            assert!(tokens[2].is_comment());
-        }
-
-        /// Tokens inside a comment are marked as comments.
-        #[test]
-        fn test_token_inside_comment_is_comment() {
-            let text = "/* comment */";
-            let tokens = tokenize_text(text);
-            assert!(tokens[1].is_comment());
-        }
-
-        /// Tokens before a comment are not marked as comments.
-        #[test]
-        fn test_token_before_comment_not_comment() {
-            let text = "before /* comment */";
-            let tokens = tokenize_text(text);
-            assert!(!tokens[0].is_comment());
-        }
-
-        /// Tokens after a comment are not marked as comments.
-        #[test]
-        fn test_token_after_comment_not_comment() {
-            let text = "/* comment */ after";
-            let tokens = tokenize_text(text);
-            assert!(!tokens[3].is_comment());
-        }
-
-        /// Nested comments are handled correctly.
-        #[test]
-        fn test_nested_comment() {
-            let text = "/* outer /* inner */ still outer */ after";
-            let tokens = tokenize_text(text);
-            let after = tokens.last().unwrap();
-            assert_eq!(after.text(text), "after");
-            assert!(!after.is_comment());
-            // All tokens except "after" should be comments.
-            for token in &tokens[..tokens.len() - 1] {
-                assert!(token.is_comment());
-            }
-        }
-
-        /// An unterminated comment marks all remaining tokens as comments.
-        #[test]
-        fn test_unterminated_comment() {
-            let text = "before /* unterminated token";
-            let tokens = tokenize_text(text);
-            assert!(!tokens[0].is_comment());
-            assert!(tokens[1].is_comment());
-            assert!(tokens[2].is_comment());
-        }
-
-        /// A multiline comment marks tokens on all spanned lines as comments.
-        #[test]
-        fn test_multiline_comment() {
-            let text = "/* comment\nstill comment */ after";
-            let tokens = tokenize_text(text);
-            let after = tokens.last().unwrap();
-            assert_eq!(after.text(text), "after");
-            assert!(!after.is_comment());
-        }
-
-        /// Token positions are correctly forwarded from the lexeme.
-        #[test]
-        fn test_token_position() {
-            let text = "create_land";
-            let tokens = tokenize_text(text);
-            assert_eq!(tokens[0].text_start(), 0);
-            assert_eq!(tokens[0].text_end(), 11);
-            assert_eq!(tokens[0].lineno(), 0);
-            assert_eq!(tokens[0].line_start(), 0);
-            assert_eq!(tokens[0].line_end(), 11);
-        }
-
-        /// Token text is correctly retrieved from the source.
-        #[test]
-        fn test_token_text() {
+        fn two_tokens_same_line_same_row() {
             let text = "terrain_type GRASS";
-            let tokens = tokenize_text(text);
-            assert_eq!(tokens[0].text(text), "terrain_type");
-            assert_eq!(tokens[1].text(text), "GRASS");
+            let rows = tokenize_text(text);
+            assert_eq!(rows[0].len(), 2);
+            assert_eq!(token_text(&rows[0][0], text), "terrain_type");
+            assert_eq!(token_text(&rows[0][1], text), "GRASS");
         }
 
-        /// `/*` not surrounded by whitespace is not treated as a comment delimiter.
+        /// Tokens on separate lines are placed in separate rows.
         #[test]
-        fn test_comment_open_no_whitespace_not_comment() {
+        fn tokens_on_separate_lines() {
+            let text = "create_land\nterrain_type";
+            let rows = tokenize_text(text);
+            assert_eq!(rows[0].len(), 1);
+            assert_eq!(token_text(&rows[0][0], text), "create_land");
+            assert_eq!(rows[1].len(), 1);
+            assert_eq!(token_text(&rows[1][0], text), "terrain_type");
+        }
+
+        /// A token on a line followed by a newline and an indented token
+        /// on the next line produces one token per row.
+        #[test]
+        fn indented_token_on_second_line() {
+            let text = "create_land\n  terrain_type";
+            let rows = tokenize_text(text);
+            assert_eq!(rows[0].len(), 1);
+            assert_eq!(rows[1].len(), 1);
+            assert_eq!(token_text(&rows[1][0], text), "terrain_type");
+        }
+
+        /// A comment and its delimiters produce no tokens.
+        #[test]
+        fn comment_produces_no_tokens() {
+            let text = "/* comment */";
+            let rows = tokenize_text(text);
+            assert!(rows[0].is_empty());
+        }
+
+        /// A token before a comment is kept; the comment is stripped.
+        #[test]
+        fn token_before_comment_kept() {
+            let text = "before /* comment */";
+            let rows = tokenize_text(text);
+            assert_eq!(rows[0].len(), 1);
+            assert_eq!(token_text(&rows[0][0], text), "before");
+        }
+
+        /// A token after a comment is kept; the comment is stripped.
+        #[test]
+        fn token_after_comment_kept() {
+            let text = "/* comment */ after";
+            let rows = tokenize_text(text);
+            assert_eq!(rows[0].len(), 1);
+            assert_eq!(token_text(&rows[0][0], text), "after");
+        }
+
+        /// Nested comments are fully stripped; only the token after is kept.
+        #[test]
+        fn nested_comment_stripped() {
+            let text = "/* outer /* inner */ still outer */ after";
+            let rows = tokenize_text(text);
+            assert_eq!(rows[0].len(), 1);
+            assert_eq!(token_text(&rows[0][0], text), "after");
+        }
+
+        /// An unterminated comment strips all remaining tokens.
+        #[test]
+        fn unterminated_comment_strips_rest() {
+            let text = "before /* unterminated token";
+            let rows = tokenize_text(text);
+            assert_eq!(rows[0].len(), 1);
+            assert_eq!(token_text(&rows[0][0], text), "before");
+        }
+
+        /// A multiline comment strips tokens on all spanned lines; the token
+        /// after the closing delimiter is placed on its own line.
+        #[test]
+        fn multiline_comment_stripped() {
+            let text = "/* comment\nstill comment */ after";
+            let rows = tokenize_text(text);
+            assert!(rows[0].is_empty());
+            assert_eq!(rows[1].len(), 1);
+            assert_eq!(token_text(&rows[1][0], text), "after");
+        }
+
+        /// `/*comment*/` with no surrounding whitespace is a single text chunk
+        /// and is not treated as a comment delimiter.
+        #[test]
+        fn comment_open_no_whitespace_not_stripped() {
             let text = "/*comment*/";
-            let tokens = tokenize_text(text);
-            assert_eq!(tokens.len(), 1);
-            assert!(!tokens[0].is_comment());
+            let rows = tokenize_text(text);
+            assert_eq!(rows[0].len(), 1);
+            assert_eq!(token_text(&rows[0][0], text), "/*comment*/");
+        }
+
+        /// Token byte range is correct for a token at the start of the file.
+        #[test]
+        fn token_range_at_file_start() {
+            let text = "create_land";
+            let rows = tokenize_text(text);
+            assert_eq!(rows[0][0].range.start(), 0);
+            assert_eq!(rows[0][0].range.end(), 11);
+        }
+
+        /// Token byte range is correct for the second token on a line.
+        #[test]
+        fn token_range_second_token_on_line() {
+            let text = "terrain_type GRASS";
+            let rows = tokenize_text(text);
+            assert_eq!(rows[0][1].range.start(), 13);
+            assert_eq!(rows[0][1].range.end(), 18);
+        }
+
+        /// Token byte range is correct for a token on the second line.
+        #[test]
+        fn token_range_second_line() {
+            let text = "abc\nterrain_type";
+            let rows = tokenize_text(text);
+            assert_eq!(rows[1][0].range.start(), 4);
+            assert_eq!(rows[1][0].range.end(), 16);
+        }
+
+        /// A trailing newline produces an extra empty row.
+        #[test]
+        fn trailing_newline_produces_empty_row() {
+            let text = "abc\n";
+            let rows = tokenize_text(text);
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[0].len(), 1);
+            assert!(rows[1].is_empty());
+        }
+
+        /// Multiple blank lines produce multiple empty rows.
+        #[test]
+        fn blank_lines_produce_empty_rows() {
+            let text = "a\n\nb";
+            let rows = tokenize_text(text);
+            assert_eq!(rows.len(), 3);
+            assert_eq!(rows[0].len(), 1);
+            assert!(rows[1].is_empty());
+            assert_eq!(rows[2].len(), 1);
+        }
+    }
+
+    mod lineno_tracking {
+        use super::*;
+
+        /// Whitespace with no newline does not advance the line: both tokens
+        /// land on row 0.
+        #[test]
+        fn spaces_only_no_line_advance() {
+            let text = "a  b";
+            let rows = tokenize_text(text);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].len(), 2);
+        }
+
+        /// A newline at the very start of a whitespace chunk (the chunk is
+        /// exactly `\n`) advances the line. This is the `<=` edge case: the
+        /// next line's start offset equals chunk.end().
+        #[test]
+        fn newline_exactly_at_chunk_end_advances_line() {
+            let text = "a\nb";
+            let rows = tokenize_text(text);
+            assert_eq!(token_text(&rows[0][0], text), "a");
+            assert_eq!(token_text(&rows[1][0], text), "b");
+        }
+
+        /// A newline followed by spaces (newline mid-whitespace) still
+        /// advances the line: the token after the spaces lands on row 1.
+        #[test]
+        fn newline_mid_whitespace_advances_line() {
+            let text = "a\n  b";
+            let rows = tokenize_text(text);
+            assert_eq!(token_text(&rows[0][0], text), "a");
+            assert_eq!(token_text(&rows[1][0], text), "b");
+        }
+
+        /// Two newlines in one whitespace chunk advance the line twice: the
+        /// token after them lands on row 2.
+        #[test]
+        fn two_newlines_advance_line_twice() {
+            let text = "a\n\nb";
+            let rows = tokenize_text(text);
+            assert_eq!(token_text(&rows[0][0], text), "a");
+            assert_eq!(token_text(&rows[2][0], text), "b");
         }
     }
 }

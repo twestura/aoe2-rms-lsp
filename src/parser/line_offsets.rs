@@ -47,6 +47,11 @@ impl LineOffsets {
             None
         }
     }
+
+    /// Returns the number of lines.
+    pub fn len(&self) -> usize {
+        self.offsets.len()
+    }
 }
 
 impl Default for LineOffsets {
@@ -137,6 +142,26 @@ mod tests {
             assert_eq!(lo.get(0), Some(0));
             assert_eq!(lo.get(1), Some(4));
             assert_eq!(lo.get(2), Some(9));
+        }
+    }
+
+    mod len {
+        use super::*;
+
+        /// Tests that a new `LineOffsets` has length 1.
+        #[test]
+        fn new_has_len_one() {
+            assert_eq!(LineOffsets::new().len(), 1);
+        }
+
+        /// Tests that `len` increases by one after each `push`.
+        #[test]
+        fn len_increases_with_push() {
+            let mut lo = LineOffsets::new();
+            lo.push(5);
+            assert_eq!(lo.len(), 2);
+            lo.push(10);
+            assert_eq!(lo.len(), 3);
         }
     }
 

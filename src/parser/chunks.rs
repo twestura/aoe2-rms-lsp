@@ -18,6 +18,7 @@ pub enum ChunkKind {
 
 /// The indices of a maximal substring consisting of either ASCII whitespace or
 /// nonwhitespace characters.
+/// A chunk always contains at least one character.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Chunk {
     /// The start and end byte indices of the chunk in the overall text buffer.
@@ -36,20 +37,42 @@ pub fn chunk_text(text: &str) -> (Vec<Chunk>, LineOffsets) {
     (chunker.chunks, chunker.line_offsets)
 }
 
+impl Chunk {
+    /// Creates a new `Chunk` with the given start (inclusive) and
+    /// end (exclusive) byte offsets and kind.
+    /// Requires `start < end`.
+    fn new(start: usize, end: usize, kind: ChunkKind) -> Self {
+        debug_assert!(end > start);
+        Self {
+            range: ByteRange::new(start, end),
+            kind,
+        }
+    }
+
+    /// Returns the start byte offset of the chunk, inclusive.
+    pub fn start(&self) -> usize {
+        self.range.start()
+    }
+
+    /// Returns the end byte offset of the chunk, exclusive.
+    pub fn end(&self) -> usize {
+        self.range.end()
+    }
+
+    /// Returns the kind of the chunk (whitespace or non-whitespace).
+    pub fn kind(&self) -> ChunkKind {
+        self.kind
+    }
+}
+
 /// Returns a `Chunk` representing a non-whitespace text substring.
 fn make_text_chunk(start: usize, end: usize) -> Chunk {
-    Chunk {
-        range: ByteRange::new(start, end),
-        kind: ChunkKind::Text,
-    }
+    Chunk::new(start, end, ChunkKind::Text)
 }
 
 /// Returns a `Chunk` representing an ASCII whitespace substring.
 fn make_ws_chunk(start: usize, end: usize) -> Chunk {
-    Chunk {
-        range: ByteRange::new(start, end),
-        kind: ChunkKind::Whitespace,
-    }
+    Chunk::new(start, end, ChunkKind::Whitespace)
 }
 
 /// A helper struct for chunking text.
