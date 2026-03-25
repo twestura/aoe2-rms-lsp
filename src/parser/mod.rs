@@ -1,9 +1,12 @@
 //! Parser for Aoe2 RMS files.
 
+use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
+
 use crate::parser::{line_offsets::LineOffsets, tokenizer::Token};
 
 mod arguments;
 mod chunks;
+mod hover;
 mod line_offsets;
 mod predefined;
 mod range;
@@ -28,6 +31,7 @@ pub struct RmsDocument {
 }
 
 impl RmsDocument {
+    /// Parses the given text into an `RmsDocument`.
     pub fn parse(text: String) -> Self {
         let (chunks, line_offsets) = chunks::chunk_text(&text);
         let tokens = tokenizer::tokenize(&text, &chunks, &line_offsets);
@@ -38,9 +42,23 @@ impl RmsDocument {
         }
     }
 
+    /// Returns a hover tooltip for the given position, if one exists.
+    pub fn hover(&self, pos: Position) -> Option<Hover> {
+        let token = self.token_at(pos.line as usize, pos.character as usize)?;
+        let token_text = self.token_text(token);
+        let hover_text = hover::lookup_hover(token_text)?;
+        Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: hover_text.to_string(),
+            }),
+            range: None,
+        })
+    }
+
     /// Returns the byte offset of the given line and column,
     /// if it is within the document.
-    pub fn offset_at(&self, lineno: usize, col: usize) -> Option<usize> {
+    fn offset_at(&self, lineno: usize, col: usize) -> Option<usize> {
         let line_start = self.line_offsets.get(lineno)?;
         let next_line_start = self.line_offsets.get(lineno + 1).unwrap_or(self.text.len());
         let offset = line_start + col;
@@ -48,14 +66,14 @@ impl RmsDocument {
     }
 
     /// Returns the source text of the given token.
-    pub fn token_text(&self, token: Token) -> &str {
+    fn token_text(&self, token: Token) -> &str {
         &self.text[token.start()..token.end()]
     }
 
     /// Returns the token at the given line and column, if one exists.
     /// - `lineno`: The 0-based line index.
     /// - `col`: The 0-based column index.
-    pub fn token_at(&self, lineno: usize, col: usize) -> Option<Token> {
+    fn token_at(&self, lineno: usize, col: usize) -> Option<Token> {
         use std::cmp::Ordering::*;
         let offset = self.offset_at(lineno, col)?;
         let token_line = self.tokens.get(lineno)?;
@@ -171,10 +189,7 @@ mod tests {
         fn col_at_token_end() {
             let doc = parse("create_land");
             // "create_land" is 11 chars; last char is at col 10.
-            assert_eq!(
-                doc.token_text(doc.token_at(0, 10).unwrap()),
-                "create_land"
-            );
+            assert_eq!(doc.token_text(doc.token_at(0, 10).unwrap()), "create_land");
         }
 
         /// A column on whitespace between two tokens returns None.
@@ -209,10 +224,7 @@ mod tests {
         #[test]
         fn col_on_second_line() {
             let doc = parse("create_land {\nterrain_type GRASS\n}");
-            assert_eq!(
-                doc.token_text(doc.token_at(1, 5).unwrap()),
-                "terrain_type"
-            );
+            assert_eq!(doc.token_text(doc.token_at(1, 5).unwrap()), "terrain_type");
         }
 
         /// A column inside a comment block returns None because comments are stripped.
@@ -249,16 +261,10 @@ mod tests {
                 doc.token_text(doc.token_at(3, 0).unwrap()),
                 "<LAND_GENERATION>"
             );
-            assert_eq!(
-                doc.token_text(doc.token_at(4, 0).unwrap()),
-                "base_terrain"
-            );
+            assert_eq!(doc.token_text(doc.token_at(4, 0).unwrap()), "base_terrain");
             assert_eq!(doc.token_text(doc.token_at(4, 13).unwrap()), "GRASS");
             assert_eq!(doc.token_text(doc.token_at(5, 0).unwrap()), "create_land");
-            assert_eq!(
-                doc.token_text(doc.token_at(6, 0).unwrap()),
-                "terrain_type"
-            );
+            assert_eq!(doc.token_text(doc.token_at(6, 0).unwrap()), "terrain_type");
             assert_eq!(doc.token_text(doc.token_at(6, 13).unwrap()), "DIRT");
             assert_eq!(doc.token_text(doc.token_at(7, 0).unwrap()), "}");
         }

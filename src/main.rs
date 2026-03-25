@@ -7,7 +7,7 @@ mod server;
 
 use parser::RmsDocument;
 
-use server::{get_completions, get_hover};
+use server::get_completions;
 
 use std::collections::HashMap;
 
@@ -89,15 +89,14 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         self.texts.write().await.remove(&uri);
+        self.documents.write().await.remove(&uri);
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let documents = self.texts.read().await;
-        Ok(documents
-            .get(&uri)
-            .and_then(|text| get_hover(text, position)))
+        let documents = self.documents.read().await;
+        Ok(documents.get(&uri).and_then(|rms| rms.hover(position)))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
