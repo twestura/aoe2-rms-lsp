@@ -2,12 +2,8 @@
 
 mod instructions; // TODO remove/refactor to parser
 mod parser;
-mod rms; // TODO remove/refactor to server
-mod server;
 
 use parser::RmsDocument;
-
-use server::get_completions;
 
 use std::collections::HashMap;
 
@@ -33,10 +29,6 @@ struct Backend {
     /// The server's in-memory document store.
     /// Maps a document's URI to its contents.
     documents: RwLock<HashMap<Url, RmsDocument>>,
-    /// The server's in-memory document store.
-    /// Maps a document's URI to its contents.
-    /// Temporary until the fully parsed document store is implemented.
-    texts: RwLock<HashMap<Url, String>>,
 }
 
 #[tower_lsp::async_trait]
@@ -69,8 +61,6 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
-        // TODO replace the basic text document with the parsed doc.
-        self.texts.write().await.insert(uri.clone(), text.clone());
         let rms_doc = RmsDocument::parse(text);
         self.documents.write().await.insert(uri, rms_doc);
     }
@@ -81,14 +71,12 @@ impl LanguageServer for Backend {
         // the entire document in the change. This is fine for small map
         // scripts (many maps are just a few hundred lines) during development.
         let text = params.content_changes.into_iter().next().unwrap().text;
-        self.texts.write().await.insert(uri.clone(), text.clone());
         let rms_doc = RmsDocument::parse(text);
         self.documents.write().await.insert(uri, rms_doc);
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
-        self.texts.write().await.remove(&uri);
         self.documents.write().await.remove(&uri);
     }
 
@@ -125,7 +113,6 @@ async fn main() {
     let (service, socket) = LspService::new(|client| Backend {
         client,
         documents: RwLock::new(HashMap::new()),
-        texts: RwLock::new(HashMap::new()), // TODO eventually remove
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
