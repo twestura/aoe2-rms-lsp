@@ -1,15 +1,24 @@
 //! Parser for Aoe2 RMS files.
 
-use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
+use tower_lsp::lsp_types::{
+    CompletionResponse, Hover, HoverContents, MarkupContent, MarkupKind, Position, Range,
+};
 
-use crate::parser::{line_offsets::LineOffsets, tokenizer::Token};
+use crate::parser::{
+    completion::CompletionText, line_offsets::LineOffsets, sorted_ranges::SortedRanges,
+    token::Token, token_lines::TokenLines,
+};
 
 mod arguments;
 mod chunks;
+mod completion;
 mod hover;
 mod line_offsets;
 mod predefined;
 mod range;
+mod sorted_ranges;
+mod token;
+mod token_lines;
 mod tokenizer;
 
 /// Represents a parsed Aoe2 RMS document.
@@ -22,23 +31,22 @@ pub struct RmsDocument {
     line_offsets: LineOffsets,
 
     /// The tokens in the document, grouped by line.
-    /// - `tokens[i]` contains the tokens for line `i`, using 0-indexed
-    ///    line numbers.
-    /// - Each row of tokens is sorted.
-    /// - Tokens do not contain comments or whitespace.
-    /// - Tokens do not overlap.
-    tokens: Vec<Vec<Token>>,
+    tokens: TokenLines,
+
+    /// Byte ranges of all block comments, sorted by start offset.
+    comment_ranges: SortedRanges,
 }
 
 impl RmsDocument {
     /// Parses the given text into an `RmsDocument`.
     pub fn parse(text: String) -> Self {
         let (chunks, line_offsets) = chunks::chunk_text(&text);
-        let tokens = tokenizer::tokenize(&text, &chunks, &line_offsets);
+        let (tokens, comment_ranges) = tokenizer::tokenize(&text, &chunks, &line_offsets);
         Self {
             text,
             line_offsets,
             tokens,
+            comment_ranges,
         }
     }
 
@@ -54,6 +62,51 @@ impl RmsDocument {
             }),
             range: None,
         })
+    }
+
+    /// Returns completion suggestions for the given position, if any.
+    ///
+    /// Returns `None` if:
+    /// - The position is out of bounds.
+    /// - The position falls within a block comment.
+    ///
+    /// Otherwise, extracts the token (or partial token) ending at `pos` as the
+    /// completion prefix and matches it case-insensitively against the list of
+    /// completable tokens. Returns the full list when the prefix is empty.
+    pub fn completion(&self, pos: Position) -> Option<CompletionResponse> {
+        let (lineno, col) = (pos.line as usize, pos.character as usize);
+        let offset = self.offset_at(lineno, col)?;
+        if self.comment_ranges.contains(offset) {
+            return None;
+        }
+
+        // Sets `i..j` to the maximal range of non-whitespace characters around `offset`,
+        // where the range can end at `offset` and must contain the character at `offset`
+        // if that character is not ascii whitespace.
+        let bytes = self.text.as_bytes();
+        let mut i = offset;
+        while i > 0 && !bytes[i - 1].is_ascii_whitespace() {
+            i -= 1;
+        }
+        let mut j = offset;
+        while j < self.text.len() && !bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        debug_assert!(i <= offset && offset <= j);
+        debug_assert!((i..j).all(|k| !bytes[k].is_ascii_whitespace()));
+
+        let line_start = self.line_offsets.get(lineno).unwrap();
+        let range = Range {
+            start: Position::new(lineno as u32, (i - line_start) as u32),
+            end: Position::new(lineno as u32, (j - line_start) as u32),
+        };
+        let completion_text = CompletionText::new(&self.text, i, offset, j, range);
+        let matches = completion::filter_tokens(&completion_text);
+        let completion_items = matches
+            .iter()
+            .map(|token| token.to_completion_item(completion_text.range))
+            .collect();
+        Some(CompletionResponse::Array(completion_items))
     }
 
     /// Returns the byte offset of the given line and column,
@@ -74,21 +127,16 @@ impl RmsDocument {
     /// - `lineno`: The 0-based line index.
     /// - `col`: The 0-based column index.
     fn token_at(&self, lineno: usize, col: usize) -> Option<Token> {
-        use std::cmp::Ordering::*;
         let offset = self.offset_at(lineno, col)?;
-        let token_line = self.tokens.get(lineno)?;
-        token_line
-            .binary_search_by(|token| {
-                if offset < token.start() {
-                    Greater
-                } else if offset >= token.end() {
-                    Less
-                } else {
-                    Equal
-                }
-            })
-            .ok() // Discard the error result if a token is not found.
-            .map(|i| token_line[i])
+        self.tokens.token_at(lineno, offset)
+    }
+
+    /// Returns `true` if the given position falls within or on a block comment.
+    /// - `lineno`: The 0-based line index.
+    /// - `col`: The 0-based column index.
+    fn is_in_comment(&self, lineno: usize, col: usize) -> bool {
+        self.offset_at(lineno, col)
+            .is_some_and(|offset| self.comment_ranges.contains(offset))
     }
 }
 

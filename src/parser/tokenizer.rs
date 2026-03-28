@@ -5,39 +5,31 @@
 
 use crate::parser::{
     chunks::{Chunk, ChunkKind},
+    sorted_ranges::SortedRanges,
     line_offsets::LineOffsets,
-    range::ByteRange,
+    token::Token,
+    token_lines::TokenLines,
 };
 
-/// A textual token in an Aoe2 RMS document.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Token {
-    /// The range of bytes in the document that this token occupies.
-    range: ByteRange,
-}
-
-impl Token {
-    /// Returns the start byte offset of this token, inclusive.
-    pub fn start(&self) -> usize {
-        self.range.start()
-    }
-
-    /// Returns the end byte offset of this token, exclusive.
-    pub fn end(&self) -> usize {
-        self.range.end()
-    }
-}
-
-/// Tokenizes the given text into a vector of tokens, grouped by line.
+/// Tokenizes the given text into tokens grouped by line, and comment ranges.
 /// - `text` is the original text of the document.
 /// - `chunks` is the list of ascii whitespace and non-whitespace substrings.
-/// - `line_offsets` is the start byte offset for each line..
-pub fn tokenize(text: &str, chunks: &[Chunk], line_offsets: &LineOffsets) -> Vec<Vec<Token>> {
+/// - `line_offsets` is the start byte offset for each line.
+///
+/// Returns `(tokens, comment_ranges)` where `comment_ranges` contains the
+/// byte ranges of all block comments, sorted by start offset.
+pub fn tokenize(
+    text: &str,
+    chunks: &[Chunk],
+    line_offsets: &LineOffsets,
+) -> (TokenLines, SortedRanges) {
     use ChunkKind::*;
     let num_lines = line_offsets.len();
-    let mut tokens = vec![vec![]; num_lines];
+    let mut tokens = TokenLines::new(num_lines);
+    let mut comments = SortedRanges::new();
     let mut lineno = 0;
     let mut comment_depth = 0u32;
+    let mut comment_start: Option<usize> = None;
     // Invariant: `lineno` is the line number of `chunk.start()`.
     for chunk in chunks {
         debug_assert!(chunk.end() <= text.len());
@@ -51,19 +43,33 @@ pub fn tokenize(text: &str, chunks: &[Chunk], line_offsets: &LineOffsets) -> Vec
                 }
             }
             Text => match &text[chunk.start()..chunk.end()] {
-                "/*" => comment_depth = comment_depth.saturating_add(1),
-                "*/" if comment_depth > 0 => comment_depth -= 1,
+                "/*" => {
+                    if comment_depth == 0 {
+                        comment_start = Some(chunk.start());
+                    }
+                    comment_depth = comment_depth.saturating_add(1);
+                }
+                "*/" if comment_depth > 0 => {
+                    comment_depth -= 1;
+                    if comment_depth == 0 {
+                        if let Some(start) = comment_start.take() {
+                            comments.push(start, chunk.end());
+                        }
+                    }
+                }
                 _lexeme => {
                     if comment_depth == 0 {
-                        tokens[lineno].push(Token {
-                            range: ByteRange::new(chunk.start(), chunk.end()),
-                        })
+                        tokens.push(lineno, Token::new(chunk.start(), chunk.end()))
                     }
                 }
             },
         }
     }
-    tokens
+    // Unterminated comment: extend the range to the end of the document.
+    if let Some(start) = comment_start {
+        comments.push(start, text.len());
+    }
+    (tokens, comments)
 }
 
 #[cfg(test)]
@@ -72,15 +78,16 @@ mod tests {
     use crate::parser::chunks::chunk_text;
 
     /// Runs the pipeline of chunking then tokenizing `text`.
-    fn tokenize_text(text: &str) -> Vec<Vec<Token>> {
+    fn tokenize_text(text: &str) -> TokenLines {
         let (chunks, line_offsets) = chunk_text(text);
-        tokenize(text, &chunks, &line_offsets)
+        let (tokens, _) = tokenize(text, &chunks, &line_offsets);
+        tokens
     }
 
     /// Returns the text of the given `token` from `text`.
     /// Requires the start and end indices of the token to be within the text.
     fn token_text<'a>(token: &Token, text: &'a str) -> &'a str {
-        &text[token.range.start()..token.range.end()]
+        &text[token.start()..token.end()]
     }
 
     mod tokenize {
@@ -205,8 +212,8 @@ mod tests {
         fn token_range_at_file_start() {
             let text = "create_land";
             let rows = tokenize_text(text);
-            assert_eq!(rows[0][0].range.start(), 0);
-            assert_eq!(rows[0][0].range.end(), 11);
+            assert_eq!(rows[0][0].start(), 0);
+            assert_eq!(rows[0][0].end(), 11);
         }
 
         /// Token byte range is correct for the second token on a line.
@@ -214,8 +221,8 @@ mod tests {
         fn token_range_second_token_on_line() {
             let text = "terrain_type GRASS";
             let rows = tokenize_text(text);
-            assert_eq!(rows[0][1].range.start(), 13);
-            assert_eq!(rows[0][1].range.end(), 18);
+            assert_eq!(rows[0][1].start(), 13);
+            assert_eq!(rows[0][1].end(), 18);
         }
 
         /// Token byte range is correct for a token on the second line.
@@ -223,8 +230,8 @@ mod tests {
         fn token_range_second_line() {
             let text = "abc\nterrain_type";
             let rows = tokenize_text(text);
-            assert_eq!(rows[1][0].range.start(), 4);
-            assert_eq!(rows[1][0].range.end(), 16);
+            assert_eq!(rows[1][0].start(), 4);
+            assert_eq!(rows[1][0].end(), 16);
         }
 
         /// A trailing newline produces an extra empty row.

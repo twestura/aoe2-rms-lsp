@@ -102,10 +102,8 @@ impl LanguageServer for Backend {
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let documents = self.texts.read().await;
-        Ok(documents
-            .get(&uri)
-            .and_then(|text| get_completions(text, position)))
+        let documents = self.documents.read().await;
+        Ok(documents.get(&uri).and_then(|rms| rms.completion(position)))
     }
 }
 
