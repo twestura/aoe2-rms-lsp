@@ -35,7 +35,7 @@ const COMPLETIONS_SRC: &str = include_str!(concat!(env!("OUT_DIR"), "/completion
 /// `PLAYER_SETUP` section token.
 #[test]
 fn hover_section() {
-    assert!(HOVER_SRC.contains("\"PLAYER_SETUP\" => Some("), "missing hover for section PLAYER_SETUP");
+    assert!(HOVER_SRC.contains("\"<PLAYER_SETUP>\" => Some("), "missing hover for section <PLAYER_SETUP>");
 }
 
 /// Checks that the `lookup_hover` function contains an arm for the

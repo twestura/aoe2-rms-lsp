@@ -186,8 +186,7 @@ pub fn generate(out_dir: &str) {
 fn read_language_toml() -> LanguageFile {
     let src = fs::read_to_string("data/language.toml")
         .unwrap_or_else(|e| panic!("Failed to read data/language.toml: {e}"));
-    toml::from_str(&src)
-        .unwrap_or_else(|e| panic!("Failed to parse data/language.toml: {e}"))
+    toml::from_str(&src).unwrap_or_else(|e| panic!("Failed to parse data/language.toml: {e}"))
 }
 
 /// Turns a [`LanguageFile`] into the Rust source for the `lookup_hover` match
@@ -200,34 +199,42 @@ fn read_language_toml() -> LanguageFile {
 /// Panics if a hover doc file cannot be read, or if its content contains
 /// `"##`, which would conflict with the raw string delimiter.
 fn generate_hover_src(lang: &LanguageFile) -> String {
-    let tables = [
-        &lang.section,
-        &lang.command,
-        &lang.attribute,
-        &lang.command_attribute,
-        &lang.keyword,
-    ];
     let mut output = String::new();
     output.push_str("/// Returns the hover documentation for the given RMS token, or `None`\n");
     output.push_str("/// if the token has no documentation.\n");
     output.push_str("pub fn lookup_hover(name: &str) -> Option<&'static str> {\n");
     output.push_str("    match name {\n");
-    for table in &tables {
-        for (name, token) in *table {
-            let path = format!("data/hover_docs/{}", token.hover);
-            let content = fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
-            assert!(
-                !content.contains("\"##"),
-                "hover doc {path} contains '\"##' which conflicts with the raw string delimiter"
-            );
-            output.push_str(&format!("        \"{name}\" => Some(r##\"{content}\"##),\n"));
+    // Section tokens use `<NAME>` as their token text, so the match key includes angle brackets.
+    for (name, token) in &lang.section {
+        let key = format!("<{name}>");
+        output.push_str(&hover_arm(&key, &token.hover));
+    }
+    for table in [
+        &lang.command,
+        &lang.attribute,
+        &lang.command_attribute,
+        &lang.keyword,
+    ] {
+        for (name, token) in table {
+            output.push_str(&hover_arm(name, &token.hover));
         }
     }
     output.push_str("        _ => None,\n");
     output.push_str("    }\n");
     output.push_str("}\n");
     output
+}
+
+/// Generates a single match arm: `"key" => Some(r##"...content..."##),`.
+fn hover_arm(key: &str, hover_path: &str) -> String {
+    let path = format!("data/hover_docs/{hover_path}");
+    let content =
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
+    assert!(
+        !content.contains("\"##"),
+        "hover doc {path} contains '\"##' which conflicts with the raw string delimiter"
+    );
+    format!("        \"{key}\" => Some(r##\"{content}\"##),\n")
 }
 
 /// Turns a [`LanguageFile`] into the Rust source for the `COMPLETABLE_TOKENS`
@@ -244,29 +251,59 @@ fn generate_hover_src(lang: &LanguageFile) -> String {
 /// Snippets are derived by [`Token::snippet`].
 fn generate_completions_src(lang: &LanguageFile) -> String {
     let mut output = String::new();
-    output.push_str("/// All tokens that are recognized by the language server and can be offered as\n");
-    output.push_str("/// completion suggestions, along with their lowercase forms for case-insensitive\n");
-    output.push_str("/// matching, their kinds for coloring and icons in the completion popup, and\n");
+    output.push_str(
+        "/// All tokens that are recognized by the language server and can be offered as\n",
+    );
+    output.push_str(
+        "/// completion suggestions, along with their lowercase forms for case-insensitive\n",
+    );
+    output.push_str(
+        "/// matching, their kinds for coloring and icons in the completion popup, and\n",
+    );
     output.push_str("/// optional snippets for expanding to full syntax with placeholders.\n");
     output.push_str("static COMPLETABLE_TOKENS: &[CompletableToken] = &[\n");
     for (name, _) in &lang.section {
         let label = format!("<{name}>");
-        output.push_str(&completion_entry_to_rust(&label, "CompletionItemKind::MODULE", None));
+        output.push_str(&completion_entry_to_rust(
+            &label,
+            "CompletionItemKind::MODULE",
+            None,
+        ));
     }
     for (name, token) in &lang.command {
-        output.push_str(&completion_entry_to_rust(name, "CompletionItemKind::FUNCTION", token.snippet(name)));
+        output.push_str(&completion_entry_to_rust(
+            name,
+            "CompletionItemKind::FUNCTION",
+            token.snippet(name),
+        ));
     }
     for (name, token) in &lang.command_attribute {
-        output.push_str(&completion_entry_to_rust(name, "CompletionItemKind::FUNCTION", token.snippet(name)));
+        output.push_str(&completion_entry_to_rust(
+            name,
+            "CompletionItemKind::FUNCTION",
+            token.snippet(name),
+        ));
     }
     for (name, token) in &lang.attribute {
-        output.push_str(&completion_entry_to_rust(name, "CompletionItemKind::PROPERTY", token.snippet(name)));
+        output.push_str(&completion_entry_to_rust(
+            name,
+            "CompletionItemKind::PROPERTY",
+            token.snippet(name),
+        ));
     }
     for (name, token) in &lang.command_attribute {
-        output.push_str(&completion_entry_to_rust(name, "CompletionItemKind::PROPERTY", token.snippet(name)));
+        output.push_str(&completion_entry_to_rust(
+            name,
+            "CompletionItemKind::PROPERTY",
+            token.snippet(name),
+        ));
     }
     for (name, token) in &lang.keyword {
-        output.push_str(&completion_entry_to_rust(name, "CompletionItemKind::KEYWORD", token.snippet(name)));
+        output.push_str(&completion_entry_to_rust(
+            name,
+            "CompletionItemKind::KEYWORD",
+            token.snippet(name),
+        ));
     }
     output.push_str("];\n");
     output
@@ -293,5 +330,7 @@ fn completion_entry_to_rust(label: &str, kind: &str, snippet: Option<String>) ->
         None => "None".to_string(),
         Some(s) => format!("Some(\"{s}\")"),
     };
-    format!("    CompletableToken {{ label: \"{label}\", lower: \"{lower}\", kind: {kind}, snippet: {snippet_src} }},\n")
+    format!(
+        "    CompletableToken {{ label: \"{label}\", lower: \"{lower}\", kind: {kind}, snippet: {snippet_src} }},\n"
+    )
 }
